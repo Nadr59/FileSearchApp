@@ -2,9 +2,12 @@ package com.filemanager.search.ui.screens
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -32,6 +35,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,6 +44,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -74,6 +79,9 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
+    // ═══════════════════════════════════════════
+    // الصلاحيات
+    // ═══════════════════════════════════════════
     val requiredPermissions = if (Build.VERSION.SDK_INT >= 33) {
         arrayOf(
             Manifest.permission.READ_MEDIA_IMAGES,
@@ -87,16 +95,27 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        viewModel.onPermissionResult(results.values.all { it })
+        val allGranted = results.values.all { it }
+        viewModel.onPermissionResult(allGranted)
+        if (allGranted) {
+            // فتح البحث مباشرة بعد منح الصلاحية
+            viewModel.searchFiles()
+        }
+    }
+
+    fun checkPermissions(): Boolean {
+        return requiredPermissions.all {
+            context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     LaunchedEffect(Unit) {
-        val allGranted = requiredPermissions.all {
-            context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
-        }
-        viewModel.onPermissionResult(allGranted)
+        viewModel.onPermissionResult(checkPermissions())
     }
 
+    // ═══════════════════════════════════════════
+    // حذف الملفات (Android 11+)
+    // ═══════════════════════════════════════════
     val deleteLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -113,7 +132,7 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
                 deleteLauncher.launch(
                     IntentSenderRequest.Builder(pendingIntent.intentSender).build()
                 )
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 viewModel.onDeleteRequestCompleted(false)
             }
         }
@@ -125,14 +144,29 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         viewModel.onBackPressed()
     }
 
+    // ═══════════════════════════════════════════
+    // إعادة فحص الصلاحيات عند العودة للتطبيق
+    // ═══════════════════════════════════════════
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(2000)
+            val granted = checkPermissions()
+            if (granted != uiState.hasPermission) {
+                viewModel.onPermissionResult(granted)
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             if (uiState.showResults) {
                 TopAppBar(
                     title = {
                         Text(
-                            if (uiState.isSelectionMode) "${uiState.selectedFileIds.size} selected"
-                            else "Results (${uiState.filteredResults.size})"
+                            if (uiState.isSelectionMode)
+                                "${uiState.selectedFileIds.size} selected"
+                            else
+                                "Results (${uiState.filteredResults.size})"
                         )
                     },
                     navigationIcon = {
@@ -146,7 +180,10 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
                                 Icon(Icons.Default.DoneAll, "Select All")
                             }
                             IconButton(onClick = { viewModel.onDeleteClicked() }) {
-                                Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                                Icon(
+                                    Icons.Default.Delete, "Delete",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
                             }
                         }
                     },
@@ -158,10 +195,14 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         }
     ) { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
         ) {
             if (!uiState.hasPermission) {
-                PermissionScreen(onRequest = { permissionLauncher.launch(requiredPermissions) })
+                PermissionScreen(
+                    onRequest = { permissionLauncher.launch(requiredPermissions) }
+                )
             } else if (!uiState.showResults) {
                 SearchSetupScreen(
                     selectedType = uiState.selectedFileType,
@@ -200,18 +241,52 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
 
 @Composable
 private fun PermissionScreen(onRequest: () -> Unit) {
+    val context = LocalContext.current
+
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(32.dp)
         ) {
-            Icon(Icons.Default.Warning, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
+            Icon(
+                Icons.Default.Warning, null,
+                Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.error
+            )
             Spacer(Modifier.height(16.dp))
-            Text("Storage Permission Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Text(
+                "Storage Permission Required",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
             Spacer(Modifier.height(8.dp))
-            Text("This app needs access to your files to search and display them.", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "This app needs access to your files to search and display them.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(24.dp))
-            Button(onClick = onRequest) { Text("Grant Permission") }
+            Button(
+                onClick = onRequest,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Grant Permission")
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = {
+                    // فتح إعدادات التطبيق مباشرة
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                    context.startActivity(intent)
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Open App Settings")
+            }
         }
     }
 }
@@ -228,30 +303,51 @@ private fun SearchSetupScreen(
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(32.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("🔍", fontSize = 48.sp)
             Spacer(Modifier.height(12.dp))
-            Text("File Search", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text(
+                "File Search",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.height(8.dp))
-            Text("Select a file type and tap Search", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "Select a file type and tap Search",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(32.dp))
 
-            ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { if (!isSearching) expanded = !expanded }) {
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { if (!isSearching) expanded = !expanded }
+            ) {
                 OutlinedTextField(
                     value = "${selectedType.emoji}  ${selectedType.displayName}",
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("File Type") },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth()
                 )
-                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
                     FileType.entries.forEach { type ->
                         DropdownMenuItem(
                             text = { Text("${type.emoji}  ${type.displayName}") },
-                            onClick = { onTypeSelected(type); expanded = false }
+                            onClick = {
+                                onTypeSelected(type)
+                                expanded = false
+                            }
                         )
                     }
                 }
@@ -261,11 +357,17 @@ private fun SearchSetupScreen(
 
             Button(
                 onClick = onSearch,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
                 enabled = !isSearching
             ) {
                 if (isSearching) {
-                    CircularProgressIndicator(Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                    CircularProgressIndicator(
+                        Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text("Searching...")
                 } else {
@@ -288,7 +390,9 @@ private fun ResultsContent(
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
@@ -313,14 +417,19 @@ private fun ResultsContent(
         }
 
         if (uiState.isSearching) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
         } else if (uiState.filteredResults.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("📂", fontSize = 48.sp)
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        if (uiState.searchQuery.isNotEmpty()) "No files match '${uiState.searchQuery}'" else "No files found",
+                        if (uiState.searchQuery.isNotEmpty())
+                            "No files match '${uiState.searchQuery}'"
+                        else
+                            "No files found",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -332,7 +441,10 @@ private fun ResultsContent(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(items = uiState.filteredResults, key = { it.id }) { file ->
+                items(
+                    items = uiState.filteredResults,
+                    key = { it.id }
+                ) { file ->
                     FileItemCard(
                         file = file,
                         isSelected = file.id in uiState.selectedFileIds,
