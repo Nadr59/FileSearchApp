@@ -96,6 +96,6 @@ class FileRepository(private val context: Context) {
 
     private fun guessMimeType(fileName: String): String {
         val ext = fileName.substringAfterLast('.', "").lowercase()
-        return MimeTypeMap.getSingleton().getMimeTypeFromExt(ext) ?: "application/octet-stream"
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
     }
 }
