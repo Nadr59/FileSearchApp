@@ -1,7 +1,6 @@
 package com.filemanager.search.ui.components
 
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -126,6 +125,7 @@ fun FileInfoBottomSheet(
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState()
+    val repo = FileRepository(context)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -183,20 +183,38 @@ fun FileInfoBottomSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
+                // ═══ زر فتح الملف ═══
                 ActionButton(
                     icon = Icons.Default.FolderOpen,
                     label = "Open",
                     color = MaterialTheme.colorScheme.primary
                 ) {
                     try {
-                        val intent = Intent(Intent.ACTION_VIEW)
-                        intent.setDataAndType(
-                            Uri.parse("file://${file.path.substringBeforeLast('/')}"),
-                            "resource/folder"
-                        )
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                    } catch (_: Exception) {}
+                        val uri = repo.getFileUri(file)
+                        if (uri != null) {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, file.mimeType.ifEmpty { "*/*" })
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(intent)
+                        }
+                    } catch (_: Exception) {
+                        try {
+                            // محاولة بديلة: افتح المجلد
+                            val intent = Intent(Intent.ACTION_VIEW)
+                            val dirPath = file.path.substringBeforeLast('/')
+                            val dirUri = androidx.core.content.FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.provider",
+                                java.io.File(dirPath)
+                            )
+                            intent.setDataAndType(dirUri, "resource/folder")
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            context.startActivity(intent)
+                        } catch (_2: Exception) {}
+                    }
                 }
 
                 ActionButton(
@@ -205,12 +223,15 @@ fun FileInfoBottomSheet(
                     color = MaterialTheme.colorScheme.secondary
                 ) {
                     try {
-                        val uri = FileRepository(context).getContentUri(file.id)
-                        val intent = Intent(Intent.ACTION_SEND)
-                        intent.type = file.mimeType.ifEmpty { "*/*" }
-                        intent.putExtra(Intent.EXTRA_STREAM, uri)
-                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        context.startActivity(Intent.createChooser(intent, "Share ${file.name}"))
+                        val uri = repo.getFileUri(file)
+                        if (uri != null) {
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = file.mimeType.ifEmpty { "*/*" }
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Share ${file.name}"))
+                        }
                     } catch (_: Exception) {}
                 }
 
@@ -272,11 +293,7 @@ fun DeleteConfirmDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
-            Icon(
-                Icons.Default.Delete, null,
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(32.dp)
-            )
+            Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(32.dp))
         },
         title = { Text(if (count == 1) "Delete file?" else "Delete $count files?", fontWeight = FontWeight.Bold) },
         text = { Text("This action cannot be undone.") },
