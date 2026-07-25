@@ -1,19 +1,15 @@
 package com.filemanager.search.ui.screens
 
 import android.Manifest
-import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
-import android.provider.MediaStore
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +43,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -70,7 +68,6 @@ import com.filemanager.search.data.FileType
 import com.filemanager.search.ui.components.DeleteConfirmDialog
 import com.filemanager.search.ui.components.FileInfoBottomSheet
 import com.filemanager.search.ui.components.FileItemCard
-import com.filemanager.search.viewmodel.FileSearchUiState
 import com.filemanager.search.viewmodel.FileSearchViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,10 +75,9 @@ import com.filemanager.search.viewmodel.FileSearchViewModel
 fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    // ═══════════════════════════════════════════
-    // فحص الصلاحيات
-    // ═══════════════════════════════════════════
+    // ═══ فحص الصلاحيات ═══
     fun checkPermissions(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             return Environment.isExternalStorageManager()
@@ -98,15 +94,12 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         }
     }
 
-    // ═══ طلب صلاحيات Media (Android 13+) ═══
     val mediaPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        val granted = results.values.all { it }
-        viewModel.onPermissionResult(granted)
+        viewModel.onPermissionResult(results.values.all { it })
     }
 
-    // ═══ طلب Manage Storage (Android 11+) ═══
     val manageStorageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -117,28 +110,11 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         viewModel.onPermissionResult(checkPermissions())
     }
 
-    // ═══════════════════════════════════════════
-    // حذف الملفات (Android 11+)
-    // ═══════════════════════════════════════════
-    val deleteLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        viewModel.onDeleteRequestCompleted(result.resultCode == Activity.RESULT_OK)
-    }
-
-    val pendingUris by viewModel.pendingDeleteUris.collectAsState()
-    LaunchedEffect(pendingUris) {
-        if (pendingUris.isNotEmpty()) {
-            try {
-                val pendingIntent = MediaStore.createDeleteRequest(
-                    context.contentResolver, pendingUris
-                )
-                deleteLauncher.launch(
-                    IntentSenderRequest.Builder(pendingIntent.intentSender).build()
-                )
-            } catch (_: Exception) {
-                viewModel.onDeleteRequestCompleted(false)
-            }
+    // ═══ رسالة الحذف ═══
+    LaunchedEffect(uiState.deleteMessage) {
+        uiState.deleteMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.onDeleteMessageShown()
         }
     }
 
@@ -149,6 +125,7 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (uiState.showResults) {
                 TopAppBar(
@@ -182,9 +159,7 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
             }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding)
-        ) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
             if (!uiState.hasPermission) {
                 PermissionScreen(
                     onRequest = {
@@ -253,15 +228,12 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
 @Composable
 private fun PermissionScreen(onRequest: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(32.dp)
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
             Icon(Icons.Default.Warning, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(16.dp))
             Text("Storage Permission Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))
-            Text("This app needs full access to your files to search and display them.", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Grant full storage access to search and manage files.", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
             Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) { Text("Grant Permission") }
         }
@@ -279,10 +251,7 @@ private fun SearchSetupScreen(
     var expanded by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("🔍", fontSize = 48.sp)
             Spacer(Modifier.height(12.dp))
             Text("File Search", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -310,12 +279,7 @@ private fun SearchSetupScreen(
             }
 
             Spacer(Modifier.height(24.dp))
-
-            Button(
-                onClick = onSearch,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                enabled = !isSearching
-            ) {
+            Button(onClick = onSearch, modifier = Modifier.fillMaxWidth().height(52.dp), enabled = !isSearching) {
                 if (isSearching) {
                     CircularProgressIndicator(Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
@@ -332,17 +296,14 @@ private fun SearchSetupScreen(
 
 @Composable
 private fun ResultsContent(
-    uiState: FileSearchUiState,
+    uiState: com.filemanager.search.viewmodel.FileSearchUiState,
     onSearchQueryChanged: (String) -> Unit,
     onFileClick: (com.filemanager.search.data.FileItem) -> Unit,
     onFileLongPress: (com.filemanager.search.data.FileItem) -> Unit,
     onDeselectAll: () -> Unit
 ) {
     Column(Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = onSearchQueryChanged,
@@ -350,9 +311,7 @@ private fun ResultsContent(
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = {
                     if (uiState.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onSearchQueryChanged("") }) {
-                            Icon(Icons.Default.Close, "Clear")
-                        }
+                        IconButton(onClick = { onSearchQueryChanged("") }) { Icon(Icons.Default.Close, "Clear") }
                     }
                 },
                 singleLine = true,
@@ -384,7 +343,7 @@ private fun ResultsContent(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(items = uiState.filteredResults, key = { it.id }) { file ->
+                items(items = uiState.filteredResults, key = { "${it.path}|${it.id}" }) { file ->
                     FileItemCard(
                         file = file,
                         isSelected = file.id in uiState.selectedFileIds,
