@@ -3,7 +3,6 @@ package com.filemanager.search.data
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
@@ -15,16 +14,10 @@ class FileRepository(private val context: Context) {
         val results = mutableListOf<FileItem>()
         val seen = mutableSetOf<String>()
 
-        // ═══ MediaStore (صور، فيديو، صوت) ═══
-        try {
-            searchViaMediaStore(fileType, results, seen)
-        } catch (_: Exception) {}
+        try { searchViaMediaStore(fileType, results, seen) } catch (_: Exception) {}
 
-        // ═══ مشي المجلدات (PDF, APK, Office...) ═══
         if (shouldUseFileSystem(fileType)) {
-            try {
-                searchViaFileSystem(fileType, results, seen)
-            } catch (_: Exception) {}
+            try { searchViaFileSystem(fileType, results, seen) } catch (_: Exception) {}
         }
 
         return results.sortedByDescending { it.dateModified }
@@ -32,11 +25,9 @@ class FileRepository(private val context: Context) {
 
     private fun shouldUseFileSystem(fileType: FileType): Boolean {
         return when (fileType) {
-            FileType.ALL,
-            FileType.TEXT, FileType.OFFICE, FileType.PDF,
+            FileType.ALL, FileType.TEXT, FileType.OFFICE, FileType.PDF,
             FileType.EBOOKS, FileType.COMPRESSED, FileType.APK,
-            FileType.CODE, FileType.GAMES, FileType.DATABASE,
-            FileType.FONTS -> true
+            FileType.CODE, FileType.GAMES, FileType.DATABASE, FileType.FONTS -> true
             FileType.IMAGES, FileType.VIDEOS, FileType.AUDIO -> false
         }
     }
@@ -84,7 +75,6 @@ class FileRepository(private val context: Context) {
                         val size = cursor.getLong(sizeCol)
                         val dateModified = cursor.getLong(dateCol) * 1000L
                         val mimeType = cursor.getString(mimeCol) ?: guessMimeType(name)
-
                         val ext = name.substringAfterLast('.', "").lowercase()
                         val detectedType = FileType.fromExtension(ext)
 
@@ -94,9 +84,7 @@ class FileRepository(private val context: Context) {
                         val path = getFilePathFromUri(contentUri) ?: ""
 
                         if (path.isNotEmpty() && seen.add(path)) {
-                            results.add(
-                                FileItem(id, name, size, dateModified, mimeType, path, ext, detectedType)
-                            )
+                            results.add(FileItem(id, name, size, dateModified, mimeType, path, ext, detectedType))
                         }
                     }
                 }
@@ -123,9 +111,7 @@ class FileRepository(private val context: Context) {
         else fileType.extensions.map { it.lowercase() }.toSet()
 
         for (dir in searchPaths) {
-            try {
-                walkDirectory(dir, extensions, results, seen, maxDepth = 10)
-            } catch (_: Exception) {}
+            try { walkDirectory(dir, extensions, results, seen, 10) } catch (_: Exception) {}
         }
     }
 
@@ -172,51 +158,29 @@ class FileRepository(private val context: Context) {
     }
 
     // ═══════════════════════════════════════════
-    // حذف ملف واحد — يعمل على كل الأجهزة
+    // حذف — مباشر بالملف
     // ═══════════════════════════════════════════
     fun deleteSingleFile(file: FileItem): Boolean {
-        // ═══ الطريقة 1: حذف مباشر من الجهاز ═══
-        try {
-            val javaFile = File(file.path)
-            if (javaFile.exists() && javaFile.canWrite()) {
-                val deleted = javaFile.delete()
+        return try {
+            val f = File(file.path)
+            if (f.exists()) {
+                val deleted = f.delete()
                 if (deleted) {
-                    // أخبر MediaStore بالتحديث
-                    scanFile(file.path)
-                    return true
+                    // أخبر النظام بتحديث
+                    android.media.MediaScannerConnection.scanFile(
+                        context, arrayOf(file.path), null, null
+                    )
                 }
+                deleted
+            } else {
+                false
             }
-        } catch (_: Exception) {}
-
-        // ═══ الطريقة 2: حذف عبر MediaStore ═══
-        try {
-            val mediaStoreId = getMediaStoreId(file.path)
-            if (mediaStoreId != null) {
-                val uri = ContentUris.withAppendedId(
-                    MediaStore.Files.getContentUri("external"),
-                    mediaStoreId
-                )
-                val count = context.contentResolver.delete(uri, null, null)
-                if (count > 0) return true
-            }
-        } catch (_: Exception) {}
-
-        // ═══ الطريقة 3: حذف MediaStore بالمسار ═══
-        try {
-            val count = context.contentResolver.delete(
-                MediaStore.Files.getContentUri("external"),
-                "${MediaStore.Files.FileColumns.DATA} = ?",
-                arrayOf(file.path)
-            )
-            if (count > 0) return true
-        } catch (_: Exception) {}
-
-        return false
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
     }
 
-    // ═══════════════════════════════════════════
-    // حذف متعدد
-    // ═══════════════════════════════════════════
     fun deleteFiles(files: List<FileItem>): Pair<Int, Int> {
         var success = 0
         var failed = 0
@@ -227,46 +191,15 @@ class FileRepository(private val context: Context) {
     }
 
     // ═══════════════════════════════════════════
-    // إعلام MediaStore بتغيير الملف
-    // ═══════════════════════════════════════════
-    private fun scanFile(path: String) {
-        try {
-            android.media.MediaScannerConnection.scanFile(
-                context, arrayOf(path), null, null
-            )
-        } catch (_: Exception) {}
-    }
-
-    // ═══════════════════════════════════════════
-    // الحصول على URI لفتح/مشاركة الملف
+    // URI لفتح/مشاركة الملف
     // ═══════════════════════════════════════════
     fun getFileUri(file: FileItem): Uri? {
-        // حاول MediaStore أولاً
-        try {
-            val mediaStoreId = getMediaStoreId(file.path)
-            if (mediaStoreId != null) {
-                val contentUri = ContentUris.withAppendedId(
-                    MediaStore.Files.getContentUri("external"),
-                    mediaStoreId
-                )
-                context.contentResolver.query(
-                    contentUri,
-                    arrayOf(MediaStore.Files.FileColumns._ID),
-                    null, null, null
-                )?.use {
-                    if (it.moveToFirst()) return contentUri
-                }
-            }
-        } catch (_: Exception) {}
-
         // FileProvider
         return try {
-            val javaFile = File(file.path)
-            if (javaFile.exists()) {
+            val f = File(file.path)
+            if (f.exists()) {
                 androidx.core.content.FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.provider",
-                    javaFile
+                    context, "${context.packageName}.provider", f
                 )
             } else null
         } catch (_: Exception) { null }
@@ -275,27 +208,11 @@ class FileRepository(private val context: Context) {
     fun getContentUri(fileId: Long) =
         ContentUris.withAppendedId(MediaStore.Files.getContentUri("external"), fileId)
 
-    private fun getMediaStoreId(path: String): Long? {
-        return try {
-            context.contentResolver.query(
-                MediaStore.Files.getContentUri("external"),
-                arrayOf(MediaStore.Files.FileColumns._ID),
-                "${MediaStore.Files.FileColumns.DATA} = ?",
-                arrayOf(path),
-                null
-            )?.use { cursor ->
-                if (cursor.moveToFirst()) cursor.getLong(0) else null
-            }
-        } catch (_: Exception) { null }
-    }
-
     private fun getFilePathFromUri(uri: Uri): String? {
         return try {
             context.contentResolver.query(
                 uri, arrayOf(MediaStore.Files.FileColumns.DATA), null, null, null
-            )?.use { c ->
-                if (c.moveToFirst()) c.getString(0) else null
-            }
+            )?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
         } catch (_: Exception) { null }
     }
 
