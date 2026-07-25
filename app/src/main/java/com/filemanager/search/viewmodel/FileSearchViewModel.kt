@@ -15,6 +15,7 @@ import kotlinx.coroutines.withContext
 
 data class FileSearchUiState(
     val hasPermission: Boolean = false,
+    val hasDeletePermission: Boolean = false,
     val selectedFileType: FileType = FileType.ALL,
     val isSearching: Boolean = false,
     val showResults: Boolean = false,
@@ -24,6 +25,7 @@ data class FileSearchUiState(
     val selectedFileIds: Set<Long> = emptySet(),
     val isSelectionMode: Boolean = false,
     val showDeleteDialog: Boolean = false,
+    val showDeletePermissionDialog: Boolean = false,
     val selectedFileInfo: FileItem? = null,
     val deleteMessage: String? = null,
     val error: String? = null
@@ -38,6 +40,17 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
 
     fun onPermissionResult(granted: Boolean) {
         _uiState.value = _uiState.value.copy(hasPermission = granted)
+    }
+
+    fun onDeletePermissionResult(granted: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            hasDeletePermission = granted,
+            showDeletePermissionDialog = false
+        )
+        // إذا منح الإذن: نفذ الحذف مباشرة
+        if (granted) {
+            doDelete()
+        }
     }
 
     fun onFileTypeSelected(type: FileType) {
@@ -117,15 +130,32 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     // ═══════════════════════════════════════════
-    // الحذف — مباشر و بسيط
+    // الحذف
     // ═══════════════════════════════════════════
     fun onDeleteClicked() {
-        _uiState.value = _uiState.value.copy(showDeleteDialog = true)
+        // تحقق من إذن الحذف أولاً
+        if (_uiState.value.hasDeletePermission) {
+            _uiState.value = _uiState.value.copy(showDeleteDialog = true)
+        } else {
+            // اطلب إذن الحذف
+            _uiState.value = _uiState.value.copy(showDeletePermissionDialog = true)
+        }
+    }
+
+    fun onDeleteConfirmDialogDismissed() {
+        _uiState.value = _uiState.value.copy(showDeleteDialog = false)
+    }
+
+    fun onDeletePermissionDialogDismissed() {
+        _uiState.value = _uiState.value.copy(showDeletePermissionDialog = false)
     }
 
     fun onDeleteConfirmed() {
         _uiState.value = _uiState.value.copy(showDeleteDialog = false)
+        doDelete()
+    }
 
+    private fun doDelete() {
         val toDelete = _uiState.value.allResults.filter {
             it.id in _uiState.value.selectedFileIds
         }.distinctBy { it.path }
@@ -133,12 +163,12 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         if (toDelete.isEmpty()) return
 
         viewModelScope.launch(Dispatchers.IO) {
-            val (success, failed) = repository.deleteFiles(toDelete)
+            val result = repository.deleteFiles(toDelete)
             withContext(Dispatchers.Main) {
-                val message = when {
-                    success > 0 && failed == 0 -> "Deleted $success file(s) ✓"
-                    success > 0 && failed > 0 -> "Deleted $success, failed $failed"
-                    else -> "Could not delete files. Try granting full storage permission."
+                val message = if (result.first > 0) {
+                    "Deleted ${result.first} file(s)"
+                } else {
+                    "Could not delete. Please grant storage permission in Settings."
                 }
                 _uiState.value = _uiState.value.copy(
                     deleteMessage = message,
@@ -150,20 +180,23 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun onDeleteCancelled() {
-        _uiState.value = _uiState.value.copy(showDeleteDialog = false)
-    }
-
     fun onDeleteSingleFile(file: FileItem) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val deleted = repository.deleteSingleFile(file)
-            withContext(Dispatchers.Main) {
-                _uiState.value = _uiState.value.copy(
-                    selectedFileInfo = null,
-                    deleteMessage = if (deleted) "Deleted ✓" else "Could not delete. Grant full storage access."
-                )
-                searchFiles()
+        if (_uiState.value.hasDeletePermission) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val deleted = repository.deleteSingleFile(file)
+                withContext(Dispatchers.Main) {
+                    _uiState.value = _uiState.value.copy(
+                        selectedFileInfo = null,
+                        deleteMessage = if (deleted) "Deleted" else "Could not delete"
+                    )
+                    searchFiles()
+                }
             }
+        } else {
+            _uiState.value = _uiState.value.copy(
+                selectedFileInfo = null,
+                showDeletePermissionDialog = true
+            )
         }
     }
 
@@ -171,9 +204,6 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.value = _uiState.value.copy(deleteMessage = null)
     }
 
-    // ═══════════════════════════════════════════
-    // معلومات الملف
-    // ═══════════════════════════════════════════
     fun onFileInfoDismissed() {
         _uiState.value = _uiState.value.copy(selectedFileInfo = null)
     }
