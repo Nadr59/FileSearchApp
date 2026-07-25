@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.filemanager.search.data.FileItem
 import com.filemanager.search.data.FileRepository
+import com.filemanager.search.data.FileSource
 import com.filemanager.search.data.FileType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,7 @@ data class FileSearchUiState(
     val isSelectionMode: Boolean = false,
     val showDeleteDialog: Boolean = false,
     val selectedFileInfo: FileItem? = null,
+    val deleteResult: String? = null,
     val error: String? = null
 )
 
@@ -49,6 +51,9 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.value = _uiState.value.copy(selectedFileType = type)
     }
 
+    // ═══════════════════════════════════════════
+    // البحث
+    // ═══════════════════════════════════════════
     fun searchFiles() {
         val type = _uiState.value.selectedFileType
         _uiState.value = _uiState.value.copy(isSearching = true, error = null)
@@ -78,17 +83,25 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    // ═══════════════════════════════════════════
+    // بحث فوري في النتائج
+    // ═══════════════════════════════════════════
     fun onSearchQueryChanged(query: String) {
         val all = _uiState.value.allResults
         val filtered = if (query.isBlank()) all
-        else all.filter { it.name.contains(query, ignoreCase = true) }
-
+        else all.filter {
+            it.name.contains(query, ignoreCase = true) ||
+            it.path.contains(query, ignoreCase = true)
+        }
         _uiState.value = _uiState.value.copy(
             searchQuery = query,
             filteredResults = filtered
         )
     }
 
+    // ═══════════════════════════════════════════
+    // التحديد
+    // ═══════════════════════════════════════════
     fun onFileClick(file: FileItem) {
         if (_uiState.value.isSelectionMode) {
             toggleSelection(file.id)
@@ -125,6 +138,9 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         )
     }
 
+    // ═══════════════════════════════════════════
+    // الحذف
+    // ═══════════════════════════════════════════
     fun onDeleteClicked() {
         _uiState.value = _uiState.value.copy(showDeleteDialog = true)
     }
@@ -138,15 +154,38 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
 
         if (toDelete.isEmpty()) return
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            _pendingDeleteUris.value = toDelete.map {
-                repository.getContentUri(it.id)
+        // ═══ تحديد: هل نحتاج طلب النظام؟ ═══
+        val hasMediaStoreFiles = toDelete.any { it.source == FileSource.MEDIASTORE }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && hasMediaStoreFiles) {
+            // ═══ Android 11+: استخدم createDeleteRequest للملفات من MediaStore ═══
+            val uris = toDelete
+                .filter { it.source == FileSource.MEDIASTORE }
+                .map { repository.getContentUri(it.id) }
+
+            if (uris.isNotEmpty()) {
+                _pendingDeleteUris.value = uris
+            }
+
+            // احذف ملفات FileSystem مباشرة
+            val fsFiles = toDelete.filter { it.source == FileSource.FILESYSTEM }
+            if (fsFiles.isNotEmpty()) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    repository.deleteFiles(fsFiles)
+                    withContext(Dispatchers.Main) {
+                        refreshResults()
+                    }
+                }
             }
         } else {
+            // ═══ Android 10 وأقل: حذف مباشر ═══
             viewModelScope.launch(Dispatchers.IO) {
-                repository.deleteFiles(toDelete)
+                val (success, _) = repository.deleteFiles(toDelete)
                 withContext(Dispatchers.Main) {
-                    searchFiles()
+                    _uiState.value = _uiState.value.copy(
+                        deleteResult = if (success) "Deleted ${toDelete.size} file(s)" else "Some files could not be deleted"
+                    )
+                    refreshResults()
                 }
             }
         }
@@ -158,7 +197,10 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
 
     fun onDeleteRequestCompleted(success: Boolean) {
         _pendingDeleteUris.value = emptyList()
-        if (success) searchFiles()
+        _uiState.value = _uiState.value.copy(
+            deleteResult = if (success) "Files deleted" else "Delete cancelled"
+        )
+        if (success) refreshResults()
     }
 
     fun onDeleteSingleFile(file: FileItem) {
@@ -169,6 +211,21 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         )
     }
 
+    fun onDeleteResultShown() {
+        _uiState.value = _uiState.value.copy(deleteResult = null)
+    }
+
+    private fun refreshResults() {
+        _uiState.value = _uiState.value.copy(
+            selectedFileIds = emptySet(),
+            isSelectionMode = false
+        )
+        searchFiles()
+    }
+
+    // ═══════════════════════════════════════════
+    // معلومات الملف
+    // ═══════════════════════════════════════════
     fun onFileInfoRequested(file: FileItem) {
         _uiState.value = _uiState.value.copy(selectedFileInfo = file)
     }
