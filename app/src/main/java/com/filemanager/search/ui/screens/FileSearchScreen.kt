@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -40,7 +41,6 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -77,37 +77,104 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // ═══ فحص الصلاحيات ═══
-    fun checkPermissions(): Boolean {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            return Environment.isExternalStorageManager()
-        }
-        return if (Build.VERSION.SDK_INT >= 33) {
-            arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.READ_MEDIA_VIDEO,
-                Manifest.permission.READ_MEDIA_AUDIO
-            ).all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+    // ═══════════════════════════════════════════
+    // فحص الصلاحيات
+    // ═══════════════════════════════════════════
+    fun hasReadPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
         } else {
             context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) ==
                     PackageManager.PERMISSION_GRANTED
         }
     }
 
-    val mediaPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        viewModel.onPermissionResult(results.values.all { it })
+    fun hasWritePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                    PackageManager.PERMISSION_GRANTED
+        }
     }
 
+    // ═══════════════════════════════════════════
+    // مطلقات الصلاحيات
+    // ═══════════════════════════════════════════
+
+    // إذن القراءة والكتابة معاً (Android 10)
+    val allPermissionsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val read = hasReadPermission()
+        val write = hasWritePermission()
+        viewModel.onPermissionResult(read)
+        viewModel.onDeletePermissionResult(write)
+    }
+
+    // إذن Manage Storage (Android 11+)
     val manageStorageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        viewModel.onPermissionResult(checkPermissions())
+        viewModel.onPermissionResult(hasReadPermission())
+        viewModel.onDeletePermissionResult(hasWritePermission())
     }
 
+    // فحص عند بدء التطبيق
     LaunchedEffect(Unit) {
-        viewModel.onPermissionResult(checkPermissions())
+        viewModel.onPermissionResult(hasReadPermission())
+        viewModel.onDeletePermissionResult(hasWritePermission())
+    }
+
+    // ═══════════════════════════════════════════
+    // طلب إذن القراءة
+    // ═══════════════════════════════════════════
+    fun requestReadPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:${context.packageName}")
+                )
+                manageStorageLauncher.launch(intent)
+            } catch (_: Exception) {
+                manageStorageLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                )
+            }
+        } else {
+            // ═══ Android 10: اطلب READ + WRITE معاً ═══
+            allPermissionsLauncher.launch(
+                arrayOf(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                )
+            )
+        }
+    }
+
+    // ═══════════════════════════════════════════
+    // طلب إذن الكتابة (للحذف)
+    // ═══════════════════════════════════════════
+    fun requestWritePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:${context.packageName}")
+                )
+                manageStorageLauncher.launch(intent)
+            } catch (_: Exception) {
+                manageStorageLauncher.launch(
+                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                )
+            }
+        } else {
+            // ═══ Android 10: اطلب WRITE ═══
+            allPermissionsLauncher.launch(
+                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            )
+        }
     }
 
     // ═══ رسالة الحذف ═══
@@ -131,10 +198,8 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
                 TopAppBar(
                     title = {
                         Text(
-                            if (uiState.isSelectionMode)
-                                "${uiState.selectedFileIds.size} selected"
-                            else
-                                "Results (${uiState.filteredResults.size})"
+                            if (uiState.isSelectionMode) "${uiState.selectedFileIds.size} selected"
+                            else "Results (${uiState.filteredResults.size})"
                         )
                     },
                     navigationIcon = {
@@ -161,34 +226,7 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (!uiState.hasPermission) {
-                PermissionScreen(
-                    onRequest = {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            try {
-                                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                                    data = Uri.parse("package:${context.packageName}")
-                                }
-                                manageStorageLauncher.launch(intent)
-                            } catch (_: Exception) {
-                                manageStorageLauncher.launch(
-                                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                                )
-                            }
-                        } else if (Build.VERSION.SDK_INT >= 33) {
-                            mediaPermissionLauncher.launch(
-                                arrayOf(
-                                    Manifest.permission.READ_MEDIA_IMAGES,
-                                    Manifest.permission.READ_MEDIA_VIDEO,
-                                    Manifest.permission.READ_MEDIA_AUDIO
-                                )
-                            )
-                        } else {
-                            mediaPermissionLauncher.launch(
-                                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-                            )
-                        }
-                    }
-                )
+                PermissionScreen(onRequest = { requestReadPermission() })
             } else if (!uiState.showResults) {
                 SearchSetupScreen(
                     selectedType = uiState.selectedFileType,
@@ -208,6 +246,7 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         }
     }
 
+    // ═══ معلومات الملف ═══
     if (uiState.selectedFileInfo != null) {
         FileInfoBottomSheet(
             file = uiState.selectedFileInfo!!,
@@ -216,11 +255,48 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         )
     }
 
+    // ═══ تأكيد الحذف ═══
     if (uiState.showDeleteDialog) {
         DeleteConfirmDialog(
             count = uiState.selectedFileIds.size,
             onConfirm = { viewModel.onDeleteConfirmed() },
-            onDismiss = { viewModel.onDeleteCancelled() }
+            onDismiss = { viewModel.onDeleteConfirmDialogDismissed() }
+        )
+    }
+
+    // ═══ طلب إذن الحذف ═══
+    if (uiState.showDeletePermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onDeletePermissionDialogDismissed() },
+            icon = {
+                Icon(
+                    Icons.Default.Warning, null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = { Text("Delete Permission Required", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                        "To delete files, enable 'Allow management of all files' in the next screen."
+                    else
+                        "To delete files, the app needs write permission to storage."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.onDeletePermissionDialogDismissed()
+                    requestWritePermission()
+                }) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.onDeletePermissionDialogDismissed() }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }
@@ -233,7 +309,7 @@ private fun PermissionScreen(onRequest: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Text("Storage Permission Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))
-            Text("Grant full storage access to search and manage files.", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Grant storage access to search and manage files.", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
             Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) { Text("Grant Permission") }
         }
