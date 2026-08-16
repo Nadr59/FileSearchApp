@@ -293,6 +293,8 @@ fun MonitorScreen(
 // ═══════════════════════════════════════════════════════════
 // عنصر أعلى تطبيقات استهلاكاً
 // ═══════════════════════════════════════════════════════════
+
+    // ═══ عدّل TopMemoryItem لعرض N/A عند عدم توفر الذاكرة ═══
 @Composable
 private fun TopMemoryItem(app: AppProcessInfo) {
     Card(
@@ -325,6 +327,7 @@ private fun TopMemoryItem(app: AppProcessInfo) {
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            // ═══ عرض الذاكرة أو N/A ═══
             if (app.memoryKb > 0L) {
                 Text(
                     formatFileSize(app.memoryKb * 1024),
@@ -332,14 +335,18 @@ private fun TopMemoryItem(app: AppProcessInfo) {
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.primary
                 )
+            } else {
+                Text(
+                    "N/A",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-// بطاقة تطبيق كاملة
-// ═══════════════════════════════════════════════════════════
+// ═══ عدّل AppProcessCard لعرض N/A وحالة أفضل ═══
 @Composable
 private fun AppProcessCard(
     app: AppProcessInfo,
@@ -376,6 +383,7 @@ private fun AppProcessCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
+                // ═══ الذاكرة: رقم أو N/A ═══
                 if (app.memoryKb > 0L) {
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
@@ -388,6 +396,21 @@ private fun AppProcessCard(
                             "RAM",
                             fontSize = 10.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            "N/A",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "RAM محجوب",
+                            fontSize = 9.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = 0.6f
+                            )
                         )
                     }
                 }
@@ -408,15 +431,6 @@ private fun AppProcessCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            }
-
-            if (app.hasBackgroundActivity) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "له نشاط في الخلفية يمكن للنظام رؤيته",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
 
             Spacer(Modifier.height(10.dp))
@@ -447,7 +461,10 @@ private fun AppProcessCard(
             }
         }
     }
-}
+}            
+            
+
+            
 
 // ═══════════════════════════════════════════════════════════
 // دوال مساعدة
