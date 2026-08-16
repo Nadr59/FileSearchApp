@@ -1,8 +1,5 @@
 package com.filemanager.search.ui.screens
 
-import android.content.Context
-import android.content.Intent
-import android.provider.Settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,9 +38,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -53,7 +47,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.filemanager.search.data.monitor.AppFilter
 import com.filemanager.search.data.monitor.AppNetworkUsage
-import com.filemanager.search.ui.components.AppIcon
+import com.filemanager.search.ui.components.AppIconImage
+import com.filemanager.search.ui.components.AppTypeBadge
 import com.filemanager.search.ui.components.NetworkStatusCard
 import com.filemanager.search.utils.formatFileSize
 import com.filemanager.search.viewmodel.NetworkViewModel
@@ -66,7 +61,6 @@ fun NetworkScreen(
     onAppClick: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -74,8 +68,7 @@ fun NetworkScreen(
                 title = { Text("استهلاك الإنترنت", fontWeight = FontWeight.Bold) },
                 actions = {
                     IconButton(onClick = { viewModel.loadData() }) {
-                        IconImage
-import com.filemanager.search.ui.components.AppTypeBadge(Icons.Default.Refresh, "Refresh")
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
                 }
             )
@@ -83,7 +76,9 @@ import com.filemanager.search.ui.components.AppTypeBadge(Icons.Default.Refresh, 
     ) { padding ->
         if (uiState.isLoading) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
@@ -104,7 +99,7 @@ import com.filemanager.search.ui.components.AppTypeBadge(Icons.Default.Refresh, 
                         mobileTotal = uiState.systemStats.mobileTotalBytes,
                         wifiTotal = uiState.systemStats.wifiTotalBytes,
                         topAppName = uiState.topApps.firstOrNull()?.appName,
-                        topAppTotal = uiState.topApps.firstOrNull()?.totalBytes ?: 0
+                        topAppTotal = uiState.topApps.firstOrNull()?.totalBytes ?: 0L
                     )
                 }
 
@@ -144,7 +139,9 @@ import com.filemanager.search.ui.components.AppTypeBadge(Icons.Default.Refresh, 
                     Card(
                         shape = RoundedCornerShape(10.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+                                alpha = 0.5f
+                            )
                         )
                     ) {
                         Text(
@@ -159,8 +156,7 @@ import com.filemanager.search.ui.components.AppTypeBadge(Icons.Default.Refresh, 
 
                 // ═══ الفلاتر ═══
                 item {
-                    Flow(Icons.Default.Search, null) },
-                       Row(
+                    FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -181,12 +177,15 @@ import com.filemanager.search.ui.components.AppTypeBadge(Icons.Default.Refresh, 
                         onValueChange = { viewModel.onSearchQueryChanged(it) },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("بحث...") },
-                        leadingIcon = { Icon trailingIcon = {
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null)
+                        },
+                        trailingIcon = {
                             if (uiState.searchQuery.isNotBlank()) {
                                 IconButton(onClick = {
                                     viewModel.onSearchQueryChanged("")
                                 }) {
-                                    Icon(Icons.Default.Close, "مسح")
+                                    Icon(Icons.Default.Close, contentDescription = "مسح")
                                 }
                             }
                         },
@@ -216,6 +215,7 @@ import com.filemanager.search.ui.components.AppTypeBadge(Icons.Default.Refresh, 
                     )
                 }
 
+                // ═══ حالة فارغة ═══
                 if (uiState.filteredApps.isEmpty() && !uiState.isLoading) {
                     item {
                         Box(
@@ -247,9 +247,11 @@ private fun AppNetworkCard(
     totalSystemBytes: Long,
     onClick: () -> Unit
 ) {
-    val percent = if (totalSystemBytes > 0) {
-        (app.totalBytes.toFloat() / totalSystemBytes * 100)
-    } else 0f
+    val percent = if (totalSystemBytes > 0L) {
+        (app.totalBytes.toFloat() / totalSystemBytes * 100f)
+    } else {
+        0f
+    }
 
     Card(
         modifier = Modifier
@@ -266,7 +268,7 @@ private fun AppNetworkCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AppIconImage(app.packageName, size = 40.dp)
+                AppIconImage(packageName = app.packageName, size = 40.dp)
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -291,7 +293,7 @@ private fun AppNetworkCard(
                         fontSize = 15.sp,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    if (percent > 0) {
+                    if (percent > 0f) {
                         Text(
                             "${String.format("%.1f", percent)}%",
                             fontSize = 11.sp,
@@ -305,7 +307,8 @@ private fun AppNetworkCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 AppTypeBadge(isSystemApp = app.isSystemApp)
                 Text(
