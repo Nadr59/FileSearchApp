@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -47,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.filemanager.search.data.monitor.AppFilter
 import com.filemanager.search.data.monitor.AppNetworkUsage
+import com.filemanager.search.data.monitor.StatsPeriod
 import com.filemanager.search.ui.components.AppIconImage
 import com.filemanager.search.ui.components.AppTypeBadge
 import com.filemanager.search.ui.components.NetworkStatusCard
@@ -68,7 +68,7 @@ fun NetworkScreen(
                 title = { Text("استهلاك الإنترنت", fontWeight = FontWeight.Bold) },
                 actions = {
                     IconButton(onClick = { viewModel.loadData() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Default.Refresh, contentDescription = "تحديث")
                     }
                 }
             )
@@ -103,6 +103,57 @@ fun NetworkScreen(
                     )
                 }
 
+                // ═══ اختيار الفترة الزمنية ═══
+                item {
+                    Text(
+                        "الفترة الزمنية",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        StatsPeriod.entries.forEach { period ->
+                            FilterChip(
+                                selected = uiState.selectedPeriod == period,
+                                onClick = { viewModel.onPeriodSelected(period) },
+                                label = { Text(period.label, fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                }
+
+                // ═══ ملاحظة مصدر البيانات ═══
+                item {
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+                                alpha = 0.5f
+                            )
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            if (uiState.isNetworkStatsData) {
+                                Text(
+                                    "بيانات ${uiState.selectedPeriod.label} — مصدقة من NetworkStatsManager",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Text(
+                                    "البيانات منذ آخر تشغيل للجهاز (TrafficStats). " +
+                                    "للحصول على إحصائيات ${uiState.selectedPeriod.label} " +
+                                    "فعّل Usage Access.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // ═══ تنبيه عدم الاتصال ═══
                 if (!uiState.isNetworkAvailable) {
                     item {
@@ -122,45 +173,56 @@ fun NetworkScreen(
                     }
                 }
 
-                // ═══ Usage Access ═══
+                // ═══ زر Usage Access ═══
                 if (!uiState.hasUsageAccess) {
                     item {
-                        TextButton(
-                            onClick = onNavigateToUsageAccess,
-                            modifier = Modifier.fillMaxWidth()
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                            )
                         ) {
-                            Text("تفعيل Usage Access لبيانات تاريخية")
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    "للحصول على بيانات تفصيلية لكل تطبيق:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "فعّل صلاحية Usage Access لعرض إحصائيات حسب الفترة المحددة",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(
+                                        alpha = 0.7f
+                                    )
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                TextButton(onClick = onNavigateToUsageAccess) {
+                                    Text("فتح إعدادات Usage Access")
+                                }
+                            }
                         }
                     }
                 }
 
-                // ═══ ملاحظة ═══
+                // ═══ فلاتر نوع التطبيق ═══
                 item {
-                    Card(
-                        shape = RoundedCornerShape(10.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
-                                alpha = 0.5f
-                            )
-                        )
-                    ) {
-                        Text(
-                            "البيانات تُجمع منذ آخر تشغيل للجهاز. " +
-                            "لإحصائيات تاريخية تفصيلية فعّل Usage Access.",
-                            modifier = Modifier.padding(12.dp),
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                // ═══ الفلاتر ═══
-                item {
+                    Text(
+                        "فلترة",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        AppFilter.entries.forEach { filter ->
+                        listOf(
+                            AppFilter.ALL,
+                            AppFilter.USER,
+                            AppFilter.SYSTEM,
+                            AppFilter.TOP_MEMORY
+                        ).forEach { filter ->
                             FilterChip(
                                 selected = uiState.filter == filter,
                                 onClick = { viewModel.onFilterSelected(filter) },
@@ -176,7 +238,7 @@ fun NetworkScreen(
                         value = uiState.searchQuery,
                         onValueChange = { viewModel.onSearchQueryChanged(it) },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("بحث...") },
+                        placeholder = { Text("بحث عن تطبيق...") },
                         leadingIcon = {
                             Icon(Icons.Default.Search, contentDescription = null)
                         },
@@ -216,7 +278,7 @@ fun NetworkScreen(
                 }
 
                 // ═══ حالة فارغة ═══
-                if (uiState.filteredApps.isEmpty() && !uiState.isLoading) {
+                if (uiState.filteredApps.isEmpty()) {
                     item {
                         Box(
                             modifier = Modifier
@@ -224,10 +286,21 @@ fun NetworkScreen(
                                 .padding(vertical = 32.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                "لا توجد بيانات استخدام",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("\uD83C\uDF10", fontSize = 40.sp)
+                                Spacer(Modifier.height(8.dp))
+                                if (!uiState.hasUsageAccess) {
+                                    Text(
+                                        "فعّل Usage Access لعرض بيانات التطبيقات",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    Text(
+                                        "لا توجد بيانات استخدام لهذه الفترة",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -238,9 +311,6 @@ fun NetworkScreen(
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-// بطاقة استخدام شبكة التطبيق
-// ═══════════════════════════════════════════════════════════
 @Composable
 private fun AppNetworkCard(
     app: AppNetworkUsage,
@@ -249,9 +319,7 @@ private fun AppNetworkCard(
 ) {
     val percent = if (totalSystemBytes > 0L) {
         (app.totalBytes.toFloat() / totalSystemBytes * 100f)
-    } else {
-        0f
-    }
+    } else 0f
 
     Card(
         modifier = Modifier
