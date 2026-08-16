@@ -1,184 +1,225 @@
-package com.filemanager.search
+package com.filemanager.search.ui.screens
 
-import android.content.Intent
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DataUsage
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import com.filemanager.search.data.FileItem
-import com.filemanager.search.ui.FileSearchTheme
-import com.filemanager.search.ui.screens.AppNetworkDetailScreen
-import com.filemanager.search.ui.screens.FileAnalysisScreen
-import com.filemanager.search.ui.screens.FileSearchScreen
-import com.filemanager.search.ui.screens.MonitorScreen
-import com.filemanager.search.ui.screens.NetworkScreen
-import com.filemanager.search.ui.screens.SettingsScreen
-import com.filemanager.search.ui.screens.UsageAccessScreen
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.filemanager.search.ui.components.AppIconImage
+import com.filemanager.search.ui.components.AppTypeBadge
+import com.filemanager.search.utils.formatFileSize
+import com.filemanager.search.viewmodel.NetworkViewModel
 
-// ═══ شاشات التطبيق ═══
-sealed class Screen {
-    data object Home : Screen()
-    data object Settings : Screen()
-    data class Analysis(val file: FileItem) : Screen()
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AppNetworkDetailScreen(
+    packageName: String,
+    onBack: () -> Unit,
+    viewModel: NetworkViewModel = viewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val app = uiState.allApps.find { it.packageName == packageName }
 
-    // جديد: شاشات المراقبة
-    data object Monitor : Screen()
-    data object Network : Screen()
-    data object UsageAccess : Screen()
-    data class AppNetworkDetail(val packageName: String) : Screen()
-}
-
-class MainActivity : ComponentActivity() {
-
-    private var currentScreen by mutableStateOf<Screen>(Screen.Home)
-    private var previousScreen by mutableStateOf<Screen>(Screen.Home)
-    private var sharedText by mutableStateOf<String?>(null)
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        handleIntent(intent)
-
-        setContent {
-            FileSearchTheme {
-                MainContent()
-            }
-        }
-    }
-
-    @Composable
-    private fun MainContent() {
-        val showBottomBar = when (currentScreen) {
-            is Screen.Home, is Screen.Monitor, is Screen.Network -> true
-            else -> false
-        }
-
-        if (showBottomBar) {
-            Scaffold(
-                bottomBar = { BottomNavBar() }
-            ) { padding ->
-                Box(modifier = Modifier.padding(padding)) {
-                    ScreenContent()
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("تفاصيل الاستهلاك", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "رجوع")
+                    }
                 }
+            )
+        }
+    ) { padding ->
+        if (app == null) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("لا توجد بيانات لهذا التطبيق")
             }
         } else {
-            ScreenContent()
-        }
-    }
-
-    @Composable
-    private fun ScreenContent() {
-        when (val screen = currentScreen) {
-            Screen.Home -> FileSearchScreen(
-                sharedText = sharedText,
-                onSharedTextConsumed = { sharedText = null },
-                onNavigateToSettings = { navigateTo(Screen.Settings) },
-                onNavigateToAnalysis = { file -> navigateTo(Screen.Analysis(file)) },
-                onNavigateToMonitor = { navigateTo(Screen.Monitor) },
-                onNavigateToNetwork = { navigateTo(Screen.Network) }
-            )
-
-            Screen.Settings -> SettingsScreen(
-                onBack = { navigateBack() }
-            )
-
-            is Screen.Analysis -> FileAnalysisScreen(
-                file = screen.file,
-                onBack = { navigateBack() }
-            )
-
-            Screen.Monitor -> MonitorScreen(
-                onNavigateToUsageAccess = {
-                    navigateTo(Screen.UsageAccess)
-                },
-                onNavigateToNetwork = { navigateTo(Screen.Network) }
-            )
-
-            Screen.Network -> NetworkScreen(
-                onNavigateToUsageAccess = {
-                    navigateTo(Screen.UsageAccess)
-                },
-                onAppClick = { pkg ->
-                    navigateTo(Screen.AppNetworkDetail(pkg))
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // ═══ بطاقة التطبيق ═══
+                item {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AppIconImage(packageName, size = 48.dp)
+                            Spacer(Modifier.width(16.dp))
+                            Column {
+                                Text(
+                                    app.appName,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                                Text(
+                                    app.packageName,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                AppTypeBadge(isSystemApp = app.isSystemApp)
+                            }
+                        }
+                    }
                 }
-            )
 
-            Screen.UsageAccess -> UsageAccessScreen(
-                onBack = { navigateBack() }
-            )
-
-            is Screen.AppNetworkDetail -> AppNetworkDetailScreen(
-                packageName = screen.packageName,
-                onBack = { navigateBack() }
-            )
-        }
-    }
-
-    @Composable
-    private fun BottomNavBar() {
-        NavigationBar {
-            NavigationBarItem(
-                selected = currentScreen is Screen.Home,
-                onClick = { navigateTo(Screen.Home) },
-                icon = { Icon(Icons.Default.Search, contentDescription = null) },
-                label = { Text("بحث") }
-            )
-            NavigationBarItem(
-                selected = currentScreen is Screen.Monitor,
-                onClick = { navigateTo(Screen.Monitor) },
-                icon = { Icon(Icons.Default.Memory, contentDescription = null) },
-                label = { Text("الذاكرة") }
-            )
-            NavigationBarItem(
-                selected = currentScreen is Screen.Network,
-                onClick = { navigateTo(Screen.Network) },
-                icon = { Icon(Icons.Default.DataUsage, contentDescription = null) },
-                label = { Text("الشبكة") }
-            )
-        }
-    }
-
-    private fun navigateTo(screen: Screen) {
-        previousScreen = currentScreen
-        currentScreen = screen
-    }
-
-    private fun navigateBack() {
-        currentScreen = previousScreen
-        previousScreen = Screen.Home
-    }
-
-    private fun handleIntent(intent: Intent?) {
-        when (intent?.action) {
-            Intent.ACTION_SEND -> {
-                if (intent.type == "text/plain") {
-                    sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
+                // ═══ الإجمالي ═══
+                item {
+                    DetailCard(
+                        title = "الإجمالي",
+                        value = formatFileSize(app.totalBytes)
+                    )
                 }
+
+                // ═══ التفاصيل ═══
+                item {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "تفاصيل الاستهلاك",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+                            DetailRow("البيانات المستلمة ↓", formatFileSize(app.rxBytes))
+                            DetailRow("البيانات المرسلة ↑", formatFileSize(app.txBytes))
+                            DetailRow("الإجمالي", formatFileSize(app.totalBytes))
+                        }
+                    }
+                }
+
+                // ═══ نسبة المساهمة ═══
+                if (uiState.systemStats.totalBytes > 0) {
+                    item {
+                        val percent = app.totalBytes.toFloat() /
+                            uiState.systemStats.totalBytes * 100
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    "نسبة المساهمة",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    "${String.format("%.2f", percent)}% من إجمالي استهلاك الجهاز",
+                                    fontSize = 14.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item { Spacer(Modifier.height(32.dp)) }
             }
         }
     }
+}
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleIntent(intent)
+@Composable
+private fun DetailCard(title: String, value: String) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(title, fontWeight = FontWeight.Medium, fontSize = 16.sp)
+            Text(
+                value,
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            label,
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            value,
+            fontWeight = FontWeight.Medium,
+            fontSize = 14.sp
+        )
     }
 }
