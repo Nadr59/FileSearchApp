@@ -1,8 +1,5 @@
 package com.filemanager.search.data.monitor
 
-/**
- * إحصائيات الشبكة الكلية للنظام
- */
 data class SystemNetworkStats(
     val totalRxBytes: Long,
     val totalTxBytes: Long,
@@ -20,9 +17,6 @@ data class SystemNetworkStats(
     }
 }
 
-/**
- * استخدام شبكة تطبيق واحد
- */
 data class AppNetworkUsage(
     val packageName: String,
     val appName: String,
@@ -34,22 +28,18 @@ data class AppNetworkUsage(
     val totalBytes: Long get() = rxBytes + txBytes
 }
 
-/**
- * بيانات الشبكة الكاملة
- */
 data class NetworkData(
     val systemStats: SystemNetworkStats,
     val appUsageList: List<AppNetworkUsage>,
-    val hasUsageAccess: Boolean
+    val hasUsageAccess: Boolean,
+    val period: StatsPeriod = StatsPeriod.MONTH,
+    val isNetworkStatsData: Boolean = false
 ) {
     companion object {
         val EMPTY = NetworkData(SystemNetworkStats.EMPTY, emptyList(), false)
     }
 }
 
-/**
- * فترة الإحصائيات
- */
 enum class StatsPeriod(val label: String, val days: Int) {
     TODAY("اليوم", 1),
     WEEK("آخر 7 أيام", 7),
