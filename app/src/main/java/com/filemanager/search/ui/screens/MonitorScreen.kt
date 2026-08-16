@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,29 +78,38 @@ fun MonitorScreen(
     val context = LocalContext.current
     var showIntervalMenu by remember { mutableStateOf(false) }
 
+    // استقرار dataNote لتجنب smart cast issues
+    val dataNote = uiState.dataNote
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("مراقبة الذاكرة", fontWeight = FontWeight.Bold) },
                 actions = {
-                    // ═══ زر المراقبة الحية ═══
                     IconButton(onClick = {
                         viewModel.onToggleMonitoring(!uiState.isMonitoring)
                     }) {
                         Icon(
-                            if (uiState.isMonitoring) Icons.Default.Pause
-                            else Icons.Default.PlayArrow,
+                            imageVector = if (uiState.isMonitoring) {
+                                Icons.Default.Pause
+                            } else {
+                                Icons.Default.PlayArrow
+                            },
                             contentDescription = "Toggle monitoring",
-                            tint = if (uiState.isMonitoring)
+                            tint = if (uiState.isMonitoring) {
                                 MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            }
                         )
                     }
 
-                    // ═══ فترة التحديث ═══
                     Box {
                         TextButton(onClick = { showIntervalMenu = true }) {
-                            Text("${uiState.refreshIntervalMs / 1000}s", fontSize = 12.sp)
+                            Text(
+                                "${uiState.refreshIntervalMs / 1000}s",
+                                fontSize = 12.sp
+                            )
                         }
                         DropdownMenu(
                             expanded = showIntervalMenu,
@@ -120,7 +128,7 @@ fun MonitorScreen(
                     }
 
                     IconButton(onClick = { viewModel.onRefresh() }) {
-                        Icon(Icons.Default.Refresh, "Refresh")
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
                 }
             )
@@ -128,7 +136,9 @@ fun MonitorScreen(
     ) { padding ->
         if (uiState.isLoading) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
@@ -153,7 +163,7 @@ fun MonitorScreen(
                 }
 
                 // ═══ ملاحظات البيانات ═══
-                if (uiState.dataNote != null) {
+                if (!dataNote.isNullOrBlank()) {
                     item {
                         Card(
                             shape = RoundedCornerShape(12.dp),
@@ -173,7 +183,7 @@ fun MonitorScreen(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    uiState.dataNote,
+                                    text = dataNote,
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -236,13 +246,15 @@ fun MonitorScreen(
                         onValueChange = { viewModel.onSearchQueryChanged(it) },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("بحث عن تطبيق...") },
-                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null)
+                        },
                         trailingIcon = {
                             if (uiState.searchQuery.isNotBlank()) {
                                 IconButton(onClick = {
                                     viewModel.onSearchQueryChanged("")
                                 }) {
-                                    Icon(Icons.Default.Close, "مسح")
+                                    Icon(Icons.Default.Close, contentDescription = "مسح")
                                 }
                             }
                         },
@@ -295,7 +307,7 @@ private fun TopMemoryItem(app: AppProcessInfo) {
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AppIconImage(app.packageName, size = 36.dp)
+            AppIconImage(packageName = app.packageName, size = 36.dp)
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -313,7 +325,7 @@ private fun TopMemoryItem(app: AppProcessInfo) {
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            if (app.memoryKb > 0) {
+            if (app.memoryKb > 0L) {
                 Text(
                     formatFileSize(app.memoryKb * 1024),
                     fontWeight = FontWeight.Bold,
@@ -346,7 +358,7 @@ private fun AppProcessCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                AppIconImage(app.packageName, size = 40.dp)
+                AppIconImage(packageName = app.packageName, size = 40.dp)
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -364,7 +376,7 @@ private fun AppProcessCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                if (app.memoryKb > 0) {
+                if (app.memoryKb > 0L) {
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
                             formatFileSize(app.memoryKb * 1024),
@@ -372,21 +384,24 @@ private fun AppProcessCard(
                             fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        Text("RAM", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "RAM",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
 
             Spacer(Modifier.height(10.dp))
 
-            // ═══ الشارات ═══
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 AppTypeBadge(isSystemApp = app.isSystemApp)
                 ProcessStateBadge(state = app.processState)
-                if (app.lastUsedTime > 0) {
+                if (app.lastUsedTime > 0L) {
                     Text(
                         "آخر استخدام: ${formatLastUsed(app.lastUsedTime)}",
                         fontSize = 10.sp,
@@ -406,7 +421,6 @@ private fun AppProcessCard(
 
             Spacer(Modifier.height(10.dp))
 
-            // ═══ الأزرار ═══
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 IconButton(
                     onClick = onOpenApp,
@@ -414,7 +428,7 @@ private fun AppProcessCard(
                 ) {
                     Icon(
                         Icons.Default.OpenInNew,
-                        "فتح",
+                        contentDescription = "فتح",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
@@ -425,7 +439,7 @@ private fun AppProcessCard(
                 ) {
                     Icon(
                         Icons.Default.Info,
-                        "معلومات",
+                        contentDescription = "معلومات",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -441,10 +455,10 @@ private fun AppProcessCard(
 private fun formatLastUsed(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp
     return when {
-        diff < 60_000 -> "الآن"
-        diff < 3600_000 -> "منذ ${diff / 60_000} دقيقة"
-        diff < 86400_000 -> "منذ ${diff / 3600_000} ساعة"
-        else -> "منذ ${diff / 86400_000} يوم"
+        diff < 60_000L -> "الآن"
+        diff < 3_600_000L -> "منذ ${diff / 60_000} دقيقة"
+        diff < 86_400_000L -> "منذ ${diff / 3_600_000} ساعة"
+        else -> "منذ ${diff / 86_400_000} يوم"
     }
 }
 
