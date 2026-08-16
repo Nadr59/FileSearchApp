@@ -87,7 +87,11 @@ fun FileSearchScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    var showSortMenu by remember { mutableStateOf(false) }
 
+    // ═══════════════════════════════════════════
+    // فحص الصلاحيات
+    // ═══════════════════════════════════════════
     fun hasReadPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -106,6 +110,9 @@ fun FileSearchScreen(
         }
     }
 
+    // ═══════════════════════════════════════════
+    // مطلقات الصلاحيات
+    // ═══════════════════════════════════════════
     val allPermissionsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
@@ -134,6 +141,9 @@ fun FileSearchScreen(
         }
     }
 
+    // ═══════════════════════════════════════════
+    // طلب إذن القراءة
+    // ═══════════════════════════════════════════
     fun requestReadPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -157,6 +167,9 @@ fun FileSearchScreen(
         }
     }
 
+    // ═══════════════════════════════════════════
+    // طلب إذن الكتابة (للحذف)
+    // ═══════════════════════════════════════════
     fun requestWritePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -177,6 +190,7 @@ fun FileSearchScreen(
         }
     }
 
+    // ═══ رسالة الحذف ═══
     LaunchedEffect(uiState.deleteMessage) {
         uiState.deleteMessage?.let {
             snackbarHostState.showSnackbar(it)
@@ -185,12 +199,12 @@ fun FileSearchScreen(
     }
 
     BackHandler(
-        enabled = uiState.showResults || uiState.isSelectionMode || uiState.selectedFileInfo != null
+        enabled = uiState.showResults ||
+                uiState.isSelectionMode ||
+                uiState.selectedFileInfo != null
     ) {
         viewModel.onBackPressed()
     }
-
-    var showSortMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -199,29 +213,34 @@ fun FileSearchScreen(
                 TopAppBar(
                     title = {
                         Text(
-                            if (uiState.isSelectionMode) "${uiState.selectedFileIds.size} selected"
-                            else "Results (${uiState.filteredResults.size})"
+                            text = if (uiState.isSelectionMode) {
+                                "${uiState.selectedFileIds.size} selected"
+                            } else {
+                                "Results (${uiState.filteredResults.size})"
+                            }
                         )
                     },
                     navigationIcon = {
                         IconButton(onClick = { viewModel.onBackPressed() }) {
-                            Icon(Icons.Default.ArrowBack, "Back")
+                            Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                         }
                     },
                     actions = {
                         if (uiState.isSelectionMode) {
                             IconButton(onClick = { viewModel.selectAll() }) {
-                                Icon(Icons.Default.DoneAll, "Select All")
+                                Icon(Icons.Default.DoneAll, contentDescription = "Select All")
                             }
                             IconButton(onClick = { viewModel.onDeleteClicked() }) {
-                                Icon(Icons.Default.Delete, "Delete",
-                                    tint = MaterialTheme.colorScheme.error)
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
                             }
                         } else {
-                            // ═══ زر الترتيب ═══
                             Box {
                                 IconButton(onClick = { showSortMenu = true }) {
-                                    Icon(Icons.Default.Sort, "Sort")
+                                    Icon(Icons.Default.Sort, contentDescription = "Sort")
                                 }
                                 DropdownMenu(
                                     expanded = showSortMenu,
@@ -230,15 +249,22 @@ fun FileSearchScreen(
                                     SortField.entries.forEach { field ->
                                         DropdownMenuItem(
                                             text = {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
                                                     Text(field.displayName)
                                                     if (uiState.sortField == field) {
                                                         Spacer(Modifier.width(8.dp))
                                                         Text(
-                                                            if (uiState.sortAscending) "↑" else "↓",
+                                                            text = if (uiState.sortAscending) "↑" else "↓",
                                                             fontSize = 14.sp,
                                                             color = MaterialTheme.colorScheme.primary
-                                                        viewModel.onSortFieldSelected(field)
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                viewModel.onSortFieldSelected(field)
                                                 showSortMenu = false
                                             }
                                         )
@@ -254,7 +280,11 @@ fun FileSearchScreen(
             }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
             if (!uiState.hasPermission) {
                 PermissionScreen(onRequest = { requestReadPermission() })
             } else if (!uiState.showResults) {
@@ -267,12 +297,7 @@ fun FileSearchScreen(
                 )
             } else {
                 ResultsContent(
-                    uiState = ui )
-                                                    }
-                                                }
-                                            },
-                                            onClick = {
-                                               State,
+                    uiState = uiState,
                     onSearchQueryChanged = { viewModel.onSearchQueryChanged(it) },
                     onFileClick = { viewModel.onFileClick(it) },
                     onFileLongPress = { viewModel.onFileLongPress(it) },
@@ -296,6 +321,7 @@ fun FileSearchScreen(
         )
     }
 
+    // ═══ تأكيد الحذف ═══
     if (uiState.showDeleteDialog) {
         DeleteConfirmDialog(
             count = uiState.selectedFileIds.size,
@@ -304,31 +330,45 @@ fun FileSearchScreen(
         )
     }
 
+    // ═══ طلب إذن الحذف ═══
     if (uiState.showDeletePermissionDialog) {
         AlertDialog(
             onDismissRequest = { viewModel.onDeletePermissionDialogDismissed() },
             icon = {
-                Icon(Icons.Default.Warning, null,
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = null,
                     tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(32.dp))
+                    modifier = Modifier.size(32.dp)
+                )
             },
-            title = { Text("Delete Permission Required", fontWeight = FontWeight.Bold) },
+            title = {
+                Text(
+                    "Delete Permission Required",
+                    fontWeight = FontWeight.Bold
+                )
+            },
             text = {
                 Text(
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                    text = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         "Enable 'Allow management of all files' in the next screen."
-                    else
+                    } else {
                         "Grant write permission to storage."
+                    }
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.onDeletePermissionDialogDismissed()
                     requestWritePermission()
-                }) { Text("Grant") }
+                }) {
+                    Text("Grant")
+                }
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.onDeletePermissionDialogDismissed() }) {
+                TextButton(onClick = {
+                    viewModel.onDeletePermissionDialogDismissed()
+                }) {
                     Text("Cancel")
                 }
             }
@@ -336,33 +376,53 @@ fun FileSearchScreen(
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// شاشة طلب الإذن
+// ═══════════════════════════════════════════════════════════
 @Composable
 private fun PermissionScreen(onRequest: () -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(32.dp)
         ) {
-            Icon(Icons.Default.Warning, null, Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.error)
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.error
+            )
             Spacer(Modifier.height(16.dp))
-            Text("Storage Permission Required",
+            Text(
+                "Storage Permission Required",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center)
+                textAlign = TextAlign.Center
+            )
             Spacer(Modifier.height(8.dp))
-            Text("Grant storage access to search and manage files.",
+            Text(
+                "Grant storage access to search and manage files.",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(24.dp))
-            Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = onRequest,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Text("Grant Permission")
             }
         }
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// شاشة الإعداد الأولي للبحث
+// ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchSetupScreen(
@@ -374,45 +434,57 @@ private fun SearchSetupScreen(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // ═══ زر الإعدادات ═══
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
                 IconButton(onClick = onSettings) {
-                    Icon(Icons.Default.Settings, "Settings")
+                    Icon(Icons.Default.Settings, contentDescription = "Settings")
                 }
             }
 
             Text("\uD83D\uDD0D", fontSize = 48.sp)
             Spacer(Modifier.height(12.dp))
-            Text("File Search",
+            Text(
+                "File Search",
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold)
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.height(8.dp))
-            Text("Select a file type and tap Search",
+            Text(
+                "Select a file type and tap Search",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(32.dp))
 
             ExposedDropdownMenuBox(
                 expanded = expanded,
-                onExpandedChange = { if (!isSearching) expanded = !expanded }
+                onExpandedChange = {
+                    if (!isSearching) expanded = !expanded
+                }
             ) {
                 OutlinedTextField(
                     value = "${selectedType.emoji}  ${selectedType.displayName}",
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("File Type") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                    trailingIcon = {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded)
+                    },
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth()
                 )
                 ExposedDropdownMenu(
                     expanded = expanded,
@@ -420,8 +492,13 @@ private fun SearchSetupScreen(
                 ) {
                     FileType.entries.forEach { type ->
                         DropdownMenuItem(
-                            text = { Text("${type.emoji}  ${type.displayName}") },
-                            onClick = { onTypeSelected(type); expanded = false }
+                            text = {
+                                Text("${type.emoji}  ${type.displayName}")
+                            },
+                            onClick = {
+                                onTypeSelected(type)
+                                expanded = false
+                            }
                         )
                     }
                 }
@@ -430,19 +507,21 @@ private fun SearchSetupScreen(
             Spacer(Modifier.height(24.dp))
             Button(
                 onClick = onSearch,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
                 enabled = !isSearching
             ) {
                 if (isSearching) {
                     CircularProgressIndicator(
-                        Modifier.size(24.dp),
+                        modifier = Modifier.size(24.dp),
                         color = MaterialTheme.colorScheme.onPrimary,
                         strokeWidth = 2.dp
                     )
                     Spacer(Modifier.width(8.dp))
                     Text("Searching...")
                 } else {
-                    Icon(Icons.Default.Search, null)
+                    Icon(Icons.Default.Search, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Search Files", fontWeight = FontWeight.Bold)
                 }
@@ -451,6 +530,9 @@ private fun SearchSetupScreen(
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// محتوى النتائج
+// ═══════════════════════════════════════════════════════════
 @Composable
 private fun ResultsContent(
     uiState: com.filemanager.search.viewmodel.FileSearchUiState,
@@ -459,20 +541,25 @@ private fun ResultsContent(
     onFileLongPress: (FileItem) -> Unit,
     onDeselectAll: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        // ═══ شريط البحث ═══
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = onSearchQueryChanged,
                 placeholder = { Text("Search in results...") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = null)
+                },
                 trailingIcon = {
                     if (uiState.searchQuery.isNotEmpty()) {
                         IconButton(onClick = { onSearchQueryChanged("") }) {
-                            Icon(Icons.Default.Close, "Clear")
+                            Icon(Icons.Default.Close, contentDescription = "Clear")
                         }
                     }
                 },
@@ -481,7 +568,9 @@ private fun ResultsContent(
             )
             if (uiState.isSelectionMode) {
                 Spacer(Modifier.width(8.dp))
-                TextButton(onClick = onDeselectAll) { Text("Cancel") }
+                TextButton(onClick = onDeselectAll) {
+                    Text("Cancel")
+                }
             }
         }
 
@@ -511,18 +600,26 @@ private fun ResultsContent(
         }
 
         if (uiState.isSearching) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator()
             }
         } else if (uiState.filteredResults.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("\uD83D\uDCC2", fontSize = 48.sp)
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        if (uiState.searchQuery.isNotEmpty())
+                        text = if (uiState.searchQuery.isNotEmpty()) {
                             "No files match '${uiState.searchQuery}'"
-                        else "No files found",
+                        } else {
+                            "No files found"
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -531,7 +628,10 @@ private fun ResultsContent(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                contentPadding = PaddingValues(
+                    horizontal = 12.dp,
+                    vertical = 4.dp
+                ),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(
@@ -546,7 +646,9 @@ private fun ResultsContent(
                         onLongClick = { onFileLongPress(file) }
                     )
                 }
-                item { Spacer(Modifier.height(80.dp)) }
+                item {
+                    Spacer(Modifier.height(80.dp))
+                }
             }
         }
     }
