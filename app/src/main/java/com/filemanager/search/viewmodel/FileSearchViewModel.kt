@@ -13,6 +13,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+// ═══ حقل الترتيب ═══
+enum class SortField(val displayName: String) {
+    NAME("Name"),
+    SIZE("Size"),
+    DATE("Date"),
+    TYPE("Type")
+}
+
 data class FileSearchUiState(
     val hasPermission: Boolean = false,
     val hasDeletePermission: Boolean = false,
@@ -28,7 +36,10 @@ data class FileSearchUiState(
     val showDeletePermissionDialog: Boolean = false,
     val selectedFileInfo: FileItem? = null,
     val deleteMessage: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    // ═══ جديد: الترتيب ═══
+    val sortField: SortField = SortField.DATE,
+    val sortAscending: Boolean = false
 )
 
 class FileSearchViewModel(application: Application) : AndroidViewModel(application) {
@@ -47,17 +58,14 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
             hasDeletePermission = granted,
             showDeletePermissionDialog = false
         )
-        // إذا منح الإذن: نفذ الحذف مباشرة
-        if (granted) {
-            doDelete()
-        }
+        if (granted) doDelete()
     }
 
     fun onFileTypeSelected(type: FileType) {
         _uiState.value = _uiState.value.copy(selectedFileType = type)
     }
 
-    fun searchFiles() {
+    fun searchFiles(initialQuery: String? = null) {
         val type = _uiState.value.selectedFileType
         _uiState.value = _uiState.value.copy(isSearching = true, error = null)
 
@@ -65,12 +73,21 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
             try {
                 val files = repository.searchFiles(type)
                 withContext(Dispatchers.Main) {
-                    _uiState.value = _uiState.value.copy(
+                    val state = _uiState.value
+                    val sorted = applySorting(files, state.sortField, state.sortAscending)
+                    val finalResults = if (!initialQuery.isNullOrBlank()) {
+                        sorted.filter {
+                            it.name.contains(initialQuery, ignoreCase = true) ||
+                            it.path.contains(initialQuery, ignoreCase = true)
+                        }
+                    } else sorted
+
+                    _uiState.value = state.copy(
                         isSearching = false,
                         showResults = true,
                         allResults = files,
-                        filteredResults = files,
-                        searchQuery = "",
+                        filteredResults = finalResults,
+                        searchQuery = initialQuery ?: "",
                         selectedFileIds = emptySet(),
                         isSelectionMode = false
                     )
@@ -93,7 +110,34 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
             it.name.contains(query, ignoreCase = true) ||
             it.path.contains(query, ignoreCase = true)
         }
-        _uiState.value = _uiState.value.copy(searchQuery = query, filteredResults = filtered)
+        val sorted = applySorting(filtered, _uiState.value.sortField, _uiState.value.sortAscending)
+        _uiState.value = _uiState.value.copy(searchQuery = query, filteredResults = sorted)
+    }
+
+    // ═══ جديد: الترتيب ═══
+    fun onSortFieldSelected(field: SortField) {
+        val current = _uiState.value
+        val newAscending = if (current.sortField == field) !current.sortAscending else false
+        val sorted = applySorting(current.filteredResults, field, newAscending)
+        _uiState.value = current.copy(
+            sortField = field,
+            sortAscending = newAscending,
+            filteredResults = sorted
+        )
+    }
+
+    private fun applySorting(
+        files: List<FileItem>,
+        field: SortField,
+        ascending: Boolean
+    ): List<FileItem> {
+        val sorted = when (field) {
+            SortField.NAME -> files.sortedBy { it.name.lowercase() }
+            SortField.SIZE -> files.sortedBy { it.size }
+            SortField.DATE -> files.sortedBy { it.dateModified }
+            SortField.TYPE -> files.sortedBy { it.extension }
+        }
+        return if (ascending) sorted else sorted.reversed()
     }
 
     fun onFileClick(file: FileItem) {
@@ -126,18 +170,19 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun deselectAll() {
-        _uiState.value = _uiState.value.copy(selectedFileIds = emptySet(), isSelectionMode = false)
+        _uiState.value = _uiState.value.copy(
+            selectedFileIds = emptySet(),
+            isSelectionMode = false
+        )
     }
 
     // ═══════════════════════════════════════════
     // الحذف
     // ═══════════════════════════════════════════
     fun onDeleteClicked() {
-        // تحقق من إذن الحذف أولاً
         if (_uiState.value.hasDeletePermission) {
             _uiState.value = _uiState.value.copy(showDeleteDialog = true)
         } else {
-            // اطلب إذن الحذف
             _uiState.value = _uiState.value.copy(showDeletePermissionDialog = true)
         }
     }
@@ -165,11 +210,8 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch(Dispatchers.IO) {
             val result = repository.deleteFiles(toDelete)
             withContext(Dispatchers.Main) {
-                val message = if (result.first > 0) {
-                    "Deleted ${result.first} file(s)"
-                } else {
-                    "Could not delete. Please grant storage permission in Settings."
-                }
+                val message = if (result.first > 0) "Deleted ${result.first} file(s)"
+                else "Could not delete. Please grant storage permission."
                 _uiState.value = _uiState.value.copy(
                     deleteMessage = message,
                     selectedFileIds = emptySet(),
@@ -212,7 +254,10 @@ class FileSearchViewModel(application: Application) : AndroidViewModel(applicati
         val s = _uiState.value
         when {
             s.isSelectionMode -> {
-                _uiState.value = s.copy(selectedFileIds = emptySet(), isSelectionMode = false)
+                _uiState.value = s.copy(
+                    selectedFileIds = emptySet(),
+                    isSelectionMode = false
+                )
             }
             s.selectedFileInfo != null -> {
                 _uiState.value = s.copy(selectedFileInfo = null)
