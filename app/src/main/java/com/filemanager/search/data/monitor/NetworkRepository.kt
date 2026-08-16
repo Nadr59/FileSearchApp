@@ -1,6 +1,7 @@
 package com.filemanager.search.data.monitor
 
 import android.app.AppOpsManager
+import android.app.usage.NetworkStatsManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
@@ -9,15 +10,14 @@ import android.net.NetworkCapabilities
 import android.net.TrafficStats
 import android.os.Build
 import android.os.Process
-import android.util.SparseArray
-import androidx.core.util.forEach
 
 class NetworkRepository(private val context: Context) {
 
     private val packageManager = context.packageManager
-    private val connectivityManager =
-        context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
+    // ═══════════════════════════════════════════
+    // فحص الصلاحيات
+    // ═══════════════════════════════════════════
     fun hasUsageStatsPermission(): Boolean {
         return try {
             val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
@@ -34,18 +34,22 @@ class NetworkRepository(private val context: Context) {
 
     fun isNetworkAvailable(): Boolean {
         return try {
-            val network = connectivityManager.activeNetwork ?: return false
-            val capabilities = connectivityManager.getNetworkCapabilities(network)
-            capabilities != null && (
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(network)
+            caps != null && (
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
             )
         } catch (_: Exception) {
             false
         }
     }
 
+    // ═══════════════════════════════════════════
+    // إحصائيات النظام (منذ تشغيل الجهاز)
+    // ═══════════════════════════════════════════
     fun getSystemStats(): SystemNetworkStats {
         return try {
             val totalRx = TrafficStats.getTotalRxBytes()
@@ -70,33 +74,115 @@ class NetworkRepository(private val context: Context) {
         }
     }
 
-    fun getPerAppUsage(): NetworkData {
+    // ═══════════════════════════════════════════
+    // بيانات الاستهلاك لكل تطبيق مع فترة
+    // ═══════════════════════════════════════════
+    fun getPerAppUsage(period: StatsPeriod): NetworkData {
         val systemStats = getSystemStats()
-        val appUsage = mutableListOf<AppNetworkUsage>()
-        val uidMap = SparseArray<MutableList<String>>()
+
+        // المحاولة الأولى: NetworkStatsManager (يحتاج Usage Access)
+        if (hasUsageStatsPermission()) {
+            try {
+                val appUsage = queryViaNetworkStatsManager(period)
+                if (appUsage.isNotEmpty()) {
+                    return NetworkData(
+                        systemStats = systemStats,
+                        appUsageList = appUsage.sortedByDescending { it.totalBytes },
+                        hasUsageAccess = true,
+                        period = period,
+                        isNetworkStatsData = true
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+
+        // المحاولة الثانية: TrafficStats (منذ تشغيل الجهاز)
+        val appUsage = queryViaTrafficStats()
+
+        return NetworkData(
+            systemStats = systemStats,
+            appUsageList = appUsage.sortedByDescending { it.totalBytes },
+            hasUsageAccess = hasUsageStatsPermission(),
+            period = period,
+            isNetworkStatsData = false
+        )
+    }
+
+    // ═══════════════════════════════════════════
+    // الطريقة 1: NetworkStatsManager (الأفضل)
+    // ═══════════════════════════════════════════
+    private fun queryViaNetworkStatsManager(
+        period: StatsPeriod
+    ): List<AppNetworkUsage> {
+        val nsm = context.getSystemService(Context.NETWORK_STATS_SERVICE)
+            as? NetworkStatsManager
+            ?: throw Exception("NetworkStatsManager not available")
+
+        val endTime = System.currentTimeMillis()
+        val startTime = endTime - (period.days.toLong() * 24L * 60L * 60L * 1000L)
+
+        // جمع البيانات حسب UID
+        val uidData = mutableMapOf<Int, Pair<Long, Long>>()
+
+        // ═══ WiFi ═══
+        try {
+            val wifiStats = nsm.querySummary(
+                ConnectivityManager.TYPE_WIFI,
+                null,
+                startTime,
+                endTime
+            )
+            while (wifiStats.hasNextBucket()) {
+                val bucket = wifiStats.getNextBucket()
+                val uid = bucket.uid
+                if (uid <= 0) continue
+                val existing = uidData[uid] ?: Pair(0L, 0L)
+                uidData[uid] = Pair(
+                    existing.first + bucket.rxBytes,
+                    existing.second + bucket.txBytes
+                )
+            }
+            wifiStats.close()
+        } catch (_: Exception) {}
+
+        // ═══ Mobile Data ═══
+        try {
+            val mobileStats = nsm.querySummary(
+                ConnectivityManager.TYPE_MOBILE,
+                null,
+                startTime,
+                endTime
+            )
+            while (mobileStats.hasNextBucket()) {
+                val bucket = mobileStats.getNextBucket()
+                val uid = bucket.uid
+                if (uid <= 0) continue
+                val existing = uidData[uid] ?: Pair(0L, 0L)
+                uidData[uid] = Pair(
+                    existing.first + bucket.rxBytes,
+                    existing.second + bucket.txBytes
+                )
+            }
+            mobileStats.close()
+        } catch (_: Exception) {}
+
+        // تحويل UID إلى أسماء تطبيقات
+        return mapUidDataToApps(uidData)
+    }
+
+    // ═══════════════════════════════════════════
+    // الطريقة 2: TrafficStats (بديل)
+    // ═══════════════════════════════════════════
+    private fun queryViaTrafficStats(): List<AppNetworkUsage> {
+        val result = mutableListOf<AppNetworkUsage>()
+        val uidData = mutableMapOf<Int, Pair<Long, Long>>()
+        val seenUids = mutableSetOf<Int>()
 
         try {
-            val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                packageManager.getInstalledApplications(
-                    PackageManager.ApplicationInfoFlags.of(0)
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                packageManager.getInstalledApplications(0)
-            }
+            val packages = getInstalledPackages()
 
             packages.forEach { appInfo ->
-                val existing = uidMap[appInfo.uid]
-                if (existing != null) {
-                    existing.add(appInfo.packageName)
-                } else {
-                    uidMap.put(appInfo.uid, mutableListOf(appInfo.packageName))
-                }
-            }
-
-            val seenUids = mutableSetOf<Int>()
-
-            uidMap.forEach { uid, packageNames ->
+                val uid = appInfo.uid
                 if (uid in seenUids) return@forEach
                 seenUids.add(uid)
 
@@ -109,39 +195,84 @@ class NetworkRepository(private val context: Context) {
 
                 val rxBytes = rx.coerceAtLeast(0L)
                 val txBytes = tx.coerceAtLeast(0L)
-                val total = rxBytes + txBytes
 
-                if (total <= 0L) return@forEach
-
-                val primaryPkg = packageNames.first()
-                val appInfo = packages.find { it.packageName == primaryPkg }
-                val isSystem = appInfo != null &&
-                    (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                val appName = try {
-                    appInfo?.loadLabel(packageManager)?.toString() ?: primaryPkg
-                } catch (_: Exception) {
-                    primaryPkg
+                if (rxBytes + txBytes > 0L) {
+                    uidData[uid] = Pair(rxBytes, txBytes)
                 }
-
-                appUsage.add(
-                    AppNetworkUsage(
-                        packageName = primaryPkg,
-                        appName = appName,
-                        isSystemApp = isSystem,
-                        rxBytes = rxBytes,
-                        txBytes = txBytes,
-                        uid = uid
-                    )
-                )
             }
         } catch (_: Exception) {}
 
-        val sorted = appUsage.sortedByDescending { it.totalBytes }
+        return mapUidDataToApps(uidData)
+    }
 
-        return NetworkData(
-            systemStats = systemStats,
-            appUsageList = sorted,
-            hasUsageAccess = hasUsageStatsPermission()
-        )
+    // ═══════════════════════════════════════════
+    // تحويل بيانات UID إلى تطبيقات
+    // ═══════════════════════════════════════════
+    private fun mapUidDataToApps(
+        uidData: Map<Int, Pair<Long, Long>>
+    ): List<AppNetworkUsage> {
+        val result = mutableListOf<AppNetworkUsage>()
+
+        for ((uid, data) in uidData) {
+            val total = data.first + data.second
+            if (total <= 0L) continue
+
+            val packages = packageManager.getPackagesForUid(uid)
+            if (packages.isNullOrEmpty()) continue
+
+            val primaryPkg = packages.first()
+            val appInfo = try {
+                getApplicationInfo(primaryPkg)
+            } catch (_: Exception) {
+                null
+            }
+
+            val isSystem = appInfo != null &&
+                (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            val appName = try {
+                appInfo?.loadLabel(packageManager)?.toString() ?: primaryPkg
+            } catch (_: Exception) {
+                primaryPkg
+            }
+
+            result.add(
+                AppNetworkUsage(
+                    packageName = primaryPkg,
+                    appName = appName,
+                    isSystemApp = isSystem,
+                    rxBytes = data.first,
+                    txBytes = data.second,
+                    uid = uid
+                )
+            )
+        }
+
+        return result
+    }
+
+    // ═══════════════════════════════════════════
+    // مساعدات
+    // ═══════════════════════════════════════════
+    private fun getInstalledPackages(): List<ApplicationInfo> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getInstalledApplications(
+                PackageManager.ApplicationInfoFlags.of(0)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getInstalledApplications(0)
+        }
+    }
+
+    private fun getApplicationInfo(packageName: String): ApplicationInfo {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getApplicationInfo(
+                packageName,
+                PackageManager.ApplicationInfoFlags.of(0)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getApplicationInfo(packageName, 0)
+        }
     }
 }
