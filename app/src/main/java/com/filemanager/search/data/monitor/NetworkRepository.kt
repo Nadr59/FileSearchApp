@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.TrafficStats
 import android.os.Build
 import android.os.Process
 import android.util.SparseArray
@@ -16,10 +17,6 @@ class NetworkRepository(private val context: Context) {
     private val packageManager = context.packageManager
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-
-    // ═══════════════════════════════════════════
-    // فحص الصلاحيات
-    // ═══════════════════════════════════════════
 
     fun hasUsageStatsPermission(): Boolean {
         return try {
@@ -49,44 +46,34 @@ class NetworkRepository(private val context: Context) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // إحصائيات النظام
-    // ═══════════════════════════════════════════
-
     fun getSystemStats(): SystemNetworkStats {
         return try {
-            val totalRx = android.net.TrafficStats.getTotalRxBytes()
-            val totalTx = android.net.TrafficStats.getTotalTxBytes()
-            val mobileRx = android.net.TrafficStats.getMobileRxBytes()
-            val mobileTx = android.net.TrafficStats.getMobileTxBytes()
+            val totalRx = TrafficStats.getTotalRxBytes()
+            val totalTx = TrafficStats.getTotalTxBytes()
+            val mobileRx = TrafficStats.getMobileRxBytes()
+            val mobileTx = TrafficStats.getMobileTxBytes()
 
-            if (totalRx == android.net.TrafficStats.UNSUPPORTED) {
+            if (totalRx == TrafficStats.UNSUPPORTED.toLong()) {
                 return SystemNetworkStats.EMPTY
             }
 
             SystemNetworkStats(
-                totalRxBytes = totalRx.coerceAtLeast(0),
-                totalTxBytes = totalTx.coerceAtLeast(0),
-                mobileRxBytes = mobileRx.coerceAtLeast(0),
-                mobileTxBytes = mobileTx.coerceAtLeast(0),
-                wifiRxBytes = (totalRx - mobileRx).coerceAtLeast(0),
-                wifiTxBytes = (totalTx - mobileTx).coerceAtLeast(0)
+                totalRxBytes = totalRx.coerceAtLeast(0L),
+                totalTxBytes = totalTx.coerceAtLeast(0L),
+                mobileRxBytes = mobileRx.coerceAtLeast(0L),
+                mobileTxBytes = mobileTx.coerceAtLeast(0L),
+                wifiRxBytes = (totalRx - mobileRx).coerceAtLeast(0L),
+                wifiTxBytes = (totalTx - mobileTx).coerceAtLeast(0L)
             )
         } catch (_: Exception) {
             SystemNetworkStats.EMPTY
         }
     }
 
-    // ═══════════════════════════════════════════
-    // إحصائيات كل تطبيق
-    // ═══════════════════════════════════════════
-
     fun getPerAppUsage(): NetworkData {
         val systemStats = getSystemStats()
-        val hasAccess = hasUsageStatsPermission()
-
         val appUsage = mutableListOf<AppNetworkUsage>()
-        val uidMap = SparseArray<MutableList<String>>() // uid -> list of packages
+        val uidMap = SparseArray<MutableList<String>>()
 
         try {
             val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -98,7 +85,6 @@ class NetworkRepository(private val context: Context) {
                 packageManager.getInstalledApplications(0)
             }
 
-            // تجميع الحزم حسب UID
             packages.forEach { appInfo ->
                 val existing = uidMap[appInfo.uid]
                 if (existing != null) {
@@ -108,26 +94,25 @@ class NetworkRepository(private val context: Context) {
                 }
             }
 
-            // جمع إحصائيات كل UID
             val seenUids = mutableSetOf<Int>()
 
             uidMap.forEach { uid, packageNames ->
-                if (seenUids.contains(uid)) return@forEach
+                if (uid in seenUids) return@forEach
                 seenUids.add(uid)
 
-                val rx = android.net.TrafficStats.getUidRxBytes(uid)
-                val tx = android.net.TrafficStats.getUidTxBytes(uid)
+                val rx = TrafficStats.getUidRxBytes(uid)
+                val tx = TrafficStats.getUidTxBytes(uid)
 
-                if (rx == android.net.TrafficStats.UNSUPPORTED &&
-                    tx == android.net.TrafficStats.UNSUPPORTED) return@forEach
+                if (rx == TrafficStats.UNSUPPORTED.toLong() &&
+                    tx == TrafficStats.UNSUPPORTED.toLong()
+                ) return@forEach
 
-                val rxBytes = rx.coerceAtLeast(0)
-                val txBytes = tx.coerceAtLeast(0)
+                val rxBytes = rx.coerceAtLeast(0L)
+                val txBytes = tx.coerceAtLeast(0L)
                 val total = rxBytes + txBytes
 
-                if (total <= 0) return@forEach
+                if (total <= 0L) return@forEach
 
-                // اختيار الحزمة الرئيسية (الأولى)
                 val primaryPkg = packageNames.first()
                 val appInfo = packages.find { it.packageName == primaryPkg }
                 val isSystem = appInfo != null &&
@@ -156,7 +141,7 @@ class NetworkRepository(private val context: Context) {
         return NetworkData(
             systemStats = systemStats,
             appUsageList = sorted,
-            hasUsageAccess = hasAccess
+            hasUsageAccess = hasUsageStatsPermission()
         )
     }
 }
