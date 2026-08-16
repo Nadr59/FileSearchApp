@@ -15,9 +15,6 @@ class NetworkRepository(private val context: Context) {
 
     private val packageManager = context.packageManager
 
-    // ═══════════════════════════════════════════
-    // فحص الصلاحيات
-    // ═══════════════════════════════════════════
     fun hasUsageStatsPermission(): Boolean {
         return try {
             val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
@@ -47,9 +44,6 @@ class NetworkRepository(private val context: Context) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // إحصائيات النظام (منذ تشغيل الجهاز)
-    // ═══════════════════════════════════════════
     fun getSystemStats(): SystemNetworkStats {
         return try {
             val totalRx = TrafficStats.getTotalRxBytes()
@@ -74,13 +68,9 @@ class NetworkRepository(private val context: Context) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // بيانات الاستهلاك لكل تطبيق مع فترة
-    // ═══════════════════════════════════════════
     fun getPerAppUsage(period: StatsPeriod): NetworkData {
         val systemStats = getSystemStats()
 
-        // المحاولة الأولى: NetworkStatsManager (يحتاج Usage Access)
         if (hasUsageStatsPermission()) {
             try {
                 val appUsage = queryViaNetworkStatsManager(period)
@@ -96,7 +86,6 @@ class NetworkRepository(private val context: Context) {
             } catch (_: Exception) {}
         }
 
-        // المحاولة الثانية: TrafficStats (منذ تشغيل الجهاز)
         val appUsage = queryViaTrafficStats()
 
         return NetworkData(
@@ -109,7 +98,7 @@ class NetworkRepository(private val context: Context) {
     }
 
     // ═══════════════════════════════════════════
-    // الطريقة 1: NetworkStatsManager (الأفضل)
+    // الطريقة 1: NetworkStatsManager
     // ═══════════════════════════════════════════
     private fun queryViaNetworkStatsManager(
         period: StatsPeriod
@@ -121,10 +110,9 @@ class NetworkRepository(private val context: Context) {
         val endTime = System.currentTimeMillis()
         val startTime = endTime - (period.days.toLong() * 24L * 60L * 60L * 1000L)
 
-        // جمع البيانات حسب UID
         val uidData = mutableMapOf<Int, Pair<Long, Long>>()
 
-        // ═══ WiFi ═══
+        // WiFi
         try {
             val wifiStats = nsm.querySummary(
                 ConnectivityManager.TYPE_WIFI,
@@ -138,14 +126,14 @@ class NetworkRepository(private val context: Context) {
                 if (uid <= 0) continue
                 val existing = uidData[uid] ?: Pair(0L, 0L)
                 uidData[uid] = Pair(
-                    existing.first + bucket.rxBytes,
-                    existing.second + bucket.txBytes
+                    existing.first + bucket.getRxBytes(),
+                    existing.second + bucket.getTxBytes()
                 )
             }
             wifiStats.close()
         } catch (_: Exception) {}
 
-        // ═══ Mobile Data ═══
+        // Mobile
         try {
             val mobileStats = nsm.querySummary(
                 ConnectivityManager.TYPE_MOBILE,
@@ -159,22 +147,20 @@ class NetworkRepository(private val context: Context) {
                 if (uid <= 0) continue
                 val existing = uidData[uid] ?: Pair(0L, 0L)
                 uidData[uid] = Pair(
-                    existing.first + bucket.rxBytes,
-                    existing.second + bucket.txBytes
+                    existing.first + bucket.getRxBytes(),
+                    existing.second + bucket.getTxBytes()
                 )
             }
             mobileStats.close()
         } catch (_: Exception) {}
 
-        // تحويل UID إلى أسماء تطبيقات
         return mapUidDataToApps(uidData)
     }
 
     // ═══════════════════════════════════════════
-    // الطريقة 2: TrafficStats (بديل)
+    // الطريقة 2: TrafficStats
     // ═══════════════════════════════════════════
     private fun queryViaTrafficStats(): List<AppNetworkUsage> {
-        val result = mutableListOf<AppNetworkUsage>()
         val uidData = mutableMapOf<Int, Pair<Long, Long>>()
         val seenUids = mutableSetOf<Int>()
 
@@ -206,7 +192,7 @@ class NetworkRepository(private val context: Context) {
     }
 
     // ═══════════════════════════════════════════
-    // تحويل بيانات UID إلى تطبيقات
+    // تحويل UID إلى تطبيقات
     // ═══════════════════════════════════════════
     private fun mapUidDataToApps(
         uidData: Map<Int, Pair<Long, Long>>
@@ -250,9 +236,6 @@ class NetworkRepository(private val context: Context) {
         return result
     }
 
-    // ═══════════════════════════════════════════
-    // مساعدات
-    // ═══════════════════════════════════════════
     private fun getInstalledPackages(): List<ApplicationInfo> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             packageManager.getInstalledApplications(
