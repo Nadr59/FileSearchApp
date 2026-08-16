@@ -1,6 +1,7 @@
 package com.filemanager.search.data.monitor
 
 import android.app.AppOpsManager
+import android.app.usage.NetworkStats
 import android.app.usage.NetworkStatsManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
@@ -71,6 +72,7 @@ class NetworkRepository(private val context: Context) {
     fun getPerAppUsage(period: StatsPeriod): NetworkData {
         val systemStats = getSystemStats()
 
+        // المحاولة الأولى: NetworkStatsManager
         if (hasUsageStatsPermission()) {
             try {
                 val appUsage = queryViaNetworkStatsManager(period)
@@ -86,6 +88,7 @@ class NetworkRepository(private val context: Context) {
             } catch (_: Exception) {}
         }
 
+        // المحاولة الثانية: TrafficStats
         val appUsage = queryViaTrafficStats()
 
         return NetworkData(
@@ -112,7 +115,7 @@ class NetworkRepository(private val context: Context) {
 
         val uidData = mutableMapOf<Int, Pair<Long, Long>>()
 
-        // WiFi
+        // ═══ WiFi ═══
         try {
             val wifiStats = nsm.querySummary(
                 ConnectivityManager.TYPE_WIFI,
@@ -120,20 +123,21 @@ class NetworkRepository(private val context: Context) {
                 startTime,
                 endTime
             )
+            val bucket = NetworkStats.Bucket()
             while (wifiStats.hasNextBucket()) {
-                val bucket = wifiStats.getNextBucket()
+                wifiStats.getNextBucket(bucket)
                 val uid = bucket.uid
                 if (uid <= 0) continue
                 val existing = uidData[uid] ?: Pair(0L, 0L)
                 uidData[uid] = Pair(
-                    existing.first + bucket.getRxBytes(),
-                    existing.second + bucket.getTxBytes()
+                    existing.first + bucket.rxBytes,
+                    existing.second + bucket.txBytes
                 )
             }
             wifiStats.close()
         } catch (_: Exception) {}
 
-        // Mobile
+        // ═══ Mobile ═══
         try {
             val mobileStats = nsm.querySummary(
                 ConnectivityManager.TYPE_MOBILE,
@@ -141,14 +145,15 @@ class NetworkRepository(private val context: Context) {
                 startTime,
                 endTime
             )
+            val bucket = NetworkStats.Bucket()
             while (mobileStats.hasNextBucket()) {
-                val bucket = mobileStats.getNextBucket()
+                mobileStats.getNextBucket(bucket)
                 val uid = bucket.uid
                 if (uid <= 0) continue
                 val existing = uidData[uid] ?: Pair(0L, 0L)
                 uidData[uid] = Pair(
-                    existing.first + bucket.getRxBytes(),
-                    existing.second + bucket.getTxBytes()
+                    existing.first + bucket.rxBytes,
+                    existing.second + bucket.txBytes
                 )
             }
             mobileStats.close()
