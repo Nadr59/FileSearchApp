@@ -8,8 +8,6 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Process
-import java.util.SortedMap
-import java.util.TreeMap
 
 class MemoryRepository(private val context: Context) {
 
@@ -20,7 +18,6 @@ class MemoryRepository(private val context: Context) {
     // ═══════════════════════════════════════════
     // فحص الصلاحيات
     // ═══════════════════════════════════════════
-
     fun hasUsageStatsPermission(): Boolean {
         return try {
             val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
@@ -35,19 +32,9 @@ class MemoryRepository(private val context: Context) {
         }
     }
 
-    fun canGetProcessInfo(): Boolean {
-        return try {
-            val processes = activityManager.runningAppProcesses
-            !processes.isNullOrEmpty()
-        } catch (_: Exception) {
-            false
-        }
-    }
-
     // ═══════════════════════════════════════════
     // معلومات النظام
     // ═══════════════════════════════════════════
-
     fun getSystemMemory(): SystemMemoryInfo {
         val memInfo = ActivityManager.MemoryInfo()
         activityManager.getMemoryInfo(memInfo)
@@ -70,49 +57,45 @@ class MemoryRepository(private val context: Context) {
     // ═══════════════════════════════════════════
     // بيانات المراقبة الكاملة
     // ═══════════════════════════════════════════
-
     fun getMonitorData(): MonitorData {
         val systemMemory = getSystemMemory()
         val hasUsageAccess = hasUsageStatsPermission()
-        val hasProcessAccess = canGetProcessInfo()
 
-        // جمع التطبيقات المثبتة
+        // ═══ 1. جمع كل التطبيقات المثبتة ═══
         val installedApps = getInstalledApps()
 
-        // محاولة الحصول على معلومات العمليات
-        val processMap = if (hasProcessAccess) getProcessInfo() else emptyMap()
+        // ═══ 2. محاولة الحصول على العمليات_RUNNING ═══
+        val processMemoryMap = tryGetProcessMemory()
 
-        // الحصول على إحصائيات الاستخدام
+        // ═══ 3. إحصائيات الاستخدام (UsageStats) ═══
         val usageMap = if (hasUsageAccess) getUsageStats() else emptyMap()
 
-        // دمج البيانات
+        // ═══ 4. دمج البيانات ═══
         val appList = installedApps.map { app ->
-            val process = processMap[app.packageName]
+            val memKb = processMemoryMap[app.packageName]
             val usage = usageMap[app.packageName]
 
             app.copy(
-                memoryKb = process?.memoryKb ?: -1L,
-                processState = determineState(app, process, usage),
+                memoryKb = memKb ?: -1L,
+                processState = determineState(app, memKb != null, usage),
                 lastUsedTime = usage?.lastUsed ?: 0L,
-                isRunning = process != null,
-                pid = process?.pid ?: -1,
-                hasBackgroundActivity = process != null && !app.isSystemApp
+                isRunning = memKb != null,
+                pid = -1,
+                hasBackgroundActivity = memKb != null
             )
-        }.sortedByDescending { app ->
-            when {
-                app.isRunning && app.memoryKb > 0 -> 3L + app.memoryKb
-                app.lastUsedTime > 0 -> 2L
-                app.isRunning -> 1L
-                else -> 0L
-            }
-        }
+        }.sortedWith(
+            compareByDescending<AppProcessInfo> { it.isRunning }
+                .thenByDescending { it.lastUsedTime > 0L }
+                .thenByDescending { it.memoryKb > 0L }
+                .thenBy { it.appName.lowercase() }
+        )
 
-        val note = buildNote(hasProcessAccess, hasUsageAccess)
+        val note = buildNote(hasUsageAccess, processMemoryMap.size)
 
         return MonitorData(
             systemMemory = systemMemory,
             appList = appList,
-            hasProcessAccess = hasProcessAccess,
+            hasProcessAccess = processMemoryMap.isNotEmpty(),
             hasUsageStatsAccess = hasUsageAccess,
             dataNote = note
         )
@@ -121,7 +104,6 @@ class MemoryRepository(private val context: Context) {
     // ═══════════════════════════════════════════
     // التطبيقات المثبتة
     // ═══════════════════════════════════════════
-
     private fun getInstalledApps(): List<AppProcessInfo> {
         return try {
             val packages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -155,23 +137,17 @@ class MemoryRepository(private val context: Context) {
     }
 
     // ═══════════════════════════════════════════
-    // معلومات العمليات
+    // محاولة الحصول على ذاكرة العمليات
+    // (مقيّد على Android 7+ — يعود بالتطبيق نفسه فقط أحياناً)
     // ═══════════════════════════════════════════
-
-    private data class ProcessData(
-        val memoryKb: Long,
-        val pid: Int,
-        val importance: Int
-    )
-
-    @Suppress("DEPRECATION")
-    private fun getProcessInfo(): Map<String, ProcessData> {
-        val result = mutableMapOf<String, ProcessData>()
+    private fun tryGetProcessMemory(): Map<String, Long> {
+        val result = mutableMapOf<String, Long>()
 
         try {
-            val processes = activityManager.runningAppProcesses ?: return result
-            val pids = processes.map { it.pid }.toIntArray()
+            val processes = activityManager.runningAppProcesses
+            if (processes.isNullOrEmpty()) return result
 
+            val pids = processes.map { it.pid }.toIntArray()
             if (pids.isEmpty()) return result
 
             val memoryInfos = try {
@@ -181,20 +157,11 @@ class MemoryRepository(private val context: Context) {
             }
 
             processes.forEachIndexed { index, process ->
-                val memKb = memoryInfos?.getOrNull(index)?.let { info ->
-                    val totalPss = info.totalPss
-                    if (totalPss > 0) totalPss.toLong() else -1L
-                } ?: -1L
-
-                // لكل حزمة في العملية
-                process.pkgList?.forEach { pkg ->
-                    val existing = result[pkg]
-                    if (existing == null || memKb > existing.memoryKb) {
-                        result[pkg] = ProcessData(
-                            memoryKb = memKb,
-                            pid = process.pid,
-                            importance = process.importance
-                        )
+                val totalPss = memoryInfos?.getOrNull(index)?.totalPss?.toLong() ?: 0L
+                if (totalPss > 0L) {
+                    process.pkgList?.forEach { pkg ->
+                        val existing = result[pkg] ?: 0L
+                        result[pkg] = maxOf(existing, totalPss)
                     }
                 }
             }
@@ -206,7 +173,6 @@ class MemoryRepository(private val context: Context) {
     // ═══════════════════════════════════════════
     // إحصائيات الاستخدام
     // ═══════════════════════════════════════════
-
     private data class UsageData(val lastUsed: Long, val totalTime: Long)
 
     private fun getUsageStats(): Map<String, UsageData> {
@@ -218,9 +184,11 @@ class MemoryRepository(private val context: Context) {
             ) as? UsageStatsManager ?: return result
 
             val now = System.currentTimeMillis()
+
+            // آخر 7 أيام
             val stats = usageStatsManager.queryUsageStats(
                 UsageStatsManager.INTERVAL_DAILY,
-                now - 24 * 60 * 60 * 1000,
+                now - 7L * 24L * 60L * 60L * 1000L,
                 now
             )
 
@@ -241,50 +209,41 @@ class MemoryRepository(private val context: Context) {
     // ═══════════════════════════════════════════
     // تحديد حالة التطبيق
     // ═══════════════════════════════════════════
-
     private fun determineState(
         app: AppProcessInfo,
-        process: ProcessData?,
+        isRunning: Boolean,
         usage: UsageData?
     ): AppProcessState {
-        // تطبيق نظام
         if (app.isSystemApp) return AppProcessState.SYSTEM
 
-        // يعمل حالياً
-        if (process != null) {
-            return when {
-                process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE ->
-                    AppProcessState.ACTIVE
-                process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_SERVICE ->
-                    AppProcessState.SERVICE
-                else -> AppProcessState.BACKGROUND
-            }
-        }
+        if (isRunning) return AppProcessState.ACTIVE
 
-        // استُخدم مؤخراً
-        if (usage != null && usage.lastUsed > 0) {
-            val hoursSinceUse = (System.currentTimeMillis() - usage.lastUsed) / (1000 * 60 * 60)
-            if (hoursSinceUse < 24) return AppProcessState.RECENTLY_USED
+        if (usage != null && usage.lastUsed > 0L) {
+            val hoursSinceUse = (System.currentTimeMillis() - usage.lastUsed) / (1000L * 60L * 60L)
+            return when {
+                hoursSinceUse < 1 -> AppProcessState.RECENTLY_USED
+                hoursSinceUse < 24 -> AppProcessState.RECENTLY_USED
+                else -> AppProcessState.UNKNOWN
+            }
         }
 
         return AppProcessState.UNKNOWN
     }
 
     // ═══════════════════════════════════════════
-    // ملاحظات حول القيود
+    // ملاحظات القيود
     // ═══════════════════════════════════════════
-
-    private fun buildNote(hasProcess: Boolean, hasUsage: Boolean): String? {
+    private fun buildNote(hasUsage: Boolean, processCount: Int): String? {
         val notes = mutableListOf<String>()
 
-        if (!hasProcess) {
-            notes.add("معلومات العمليات محدودة على إصدار Android هذا")
+        if (processCount <= 1) {
+            notes.add("Android ي限制 الوصول لذاكرة التطبيقات الأخرى")
         }
         if (!hasUsage) {
             notes.add("بيانات الاستخدام تحتاج صلاحية Usage Access")
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            notes.add("Android ${Build.VERSION.RELEASE} ي限制 وصول التطبيقات لبيانات العمليات الأخرى")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            notes.add("ذاكرة التطبيقات الفردية غير متاحة على Android ${Build.VERSION.RELEASE}")
         }
 
         return if (notes.isEmpty()) null else notes.joinToString(" · ")
