@@ -27,8 +27,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sort
@@ -69,12 +71,16 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.filemanager.search.data.FileItem
 import com.filemanager.search.data.FileType
+import com.filemanager.search.ui.components.DashboardFeatureCard
 import com.filemanager.search.ui.components.DeleteConfirmDialog
 import com.filemanager.search.ui.components.FileInfoBottomSheet
 import com.filemanager.search.ui.components.FileItemCard
 import com.filemanager.search.viewmodel.FileSearchViewModel
 import com.filemanager.search.viewmodel.SortField
 
+// ═══════════════════════════════════════════════════════════
+// ═══ الشاشة الرئيسية ═══
+// ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileSearchScreen(
@@ -82,7 +88,9 @@ fun FileSearchScreen(
     sharedText: String? = null,
     onSharedTextConsumed: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToAnalysis: (FileItem) -> Unit = {}
+    onNavigateToAnalysis: (FileItem) -> Unit = {},
+    onNavigateToMonitor: () -> Unit = {},
+    onNavigateToNetwork: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -127,6 +135,7 @@ fun FileSearchScreen(
         viewModel.onDeletePermissionResult(hasWritePermission())
     }
 
+    // فحص عند بدء التطبيق
     LaunchedEffect(Unit) {
         viewModel.onPermissionResult(hasReadPermission())
         viewModel.onDeletePermissionResult(hasWritePermission())
@@ -293,7 +302,9 @@ fun FileSearchScreen(
                     isSearching = uiState.isSearching,
                     onTypeSelected = { viewModel.onFileTypeSelected(it) },
                     onSearch = { viewModel.searchFiles() },
-                    onSettings = onNavigateToSettings
+                    onSettings = onNavigateToSettings,
+                    onNavigateToMonitor = onNavigateToMonitor,
+                    onNavigateToNetwork = onNavigateToNetwork
                 )
             } else {
                 ResultsContent(
@@ -377,7 +388,7 @@ fun FileSearchScreen(
 }
 
 // ═══════════════════════════════════════════════════════════
-// شاشة طلب الإذن
+// ═══ شاشة طلب الإذن ═══
 // ═══════════════════════════════════════════════════════════
 @Composable
 private fun PermissionScreen(onRequest: () -> Unit) {
@@ -421,7 +432,7 @@ private fun PermissionScreen(onRequest: () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// شاشة الإعداد الأولي للبحث
+// ═══ شاشة الإعداد الأولي للبحث + Dashboard ═══
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -430,7 +441,9 @@ private fun SearchSetupScreen(
     isSearching: Boolean,
     onTypeSelected: (FileType) -> Unit,
     onSearch: () -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    onNavigateToMonitor: () -> Unit,
+    onNavigateToNetwork: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -444,6 +457,7 @@ private fun SearchSetupScreen(
                 .padding(32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // ═══ زر الإعدادات ═══
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
@@ -468,6 +482,7 @@ private fun SearchSetupScreen(
             )
             Spacer(Modifier.height(32.dp))
 
+            // ═══ اختيار نوع الملف ═══
             ExposedDropdownMenuBox(
                 expanded = expanded,
                 onExpandedChange = {
@@ -505,6 +520,8 @@ private fun SearchSetupScreen(
             }
 
             Spacer(Modifier.height(24.dp))
+
+            // ═══ زر البحث ═══
             Button(
                 onClick = onSearch,
                 modifier = Modifier
@@ -526,12 +543,45 @@ private fun SearchSetupScreen(
                     Text("Search Files", fontWeight = FontWeight.Bold)
                 }
             }
+
+            // ═══ بطاقات الميزات الجديدة ═══
+            Spacer(Modifier.height(32.dp))
+
+            Text(
+                "أدوات المراقبة",
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            DashboardFeatureCard(
+                title = "مراقبة الذاكرة",
+                value = "RAM",
+                subtitle = "استهلاك التطبيقات والعمليات",
+                icon = Icons.Default.Memory,
+                color = MaterialTheme.colorScheme.primary,
+                onClick = onNavigateToMonitor
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            DashboardFeatureCard(
+                title = "استهلاك الإنترنت",
+                value = "Network",
+                subtitle = "بيانات التطبيقات المرسلة والمستلمة",
+                icon = Icons.Default.DataUsage,
+                color = MaterialTheme.colorScheme.secondary,
+                onClick = onNavigateToNetwork
+            )
         }
     }
 }
 
 // ═══════════════════════════════════════════════════════════
-// محتوى النتائج
+// ═══ محتوى النتائج ═══
 // ═══════════════════════════════════════════════════════════
 @Composable
 private fun ResultsContent(
@@ -599,6 +649,7 @@ private fun ResultsContent(
             )
         }
 
+        // ═══ حالة التحميل ═══
         if (uiState.isSearching) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -607,6 +658,7 @@ private fun ResultsContent(
                 CircularProgressIndicator()
             }
         } else if (uiState.filteredResults.isEmpty()) {
+            // ═══ حالة فارغة ═══
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -626,6 +678,7 @@ private fun ResultsContent(
                 }
             }
         } else {
+            // ═══ قائمة النتائج ═══
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
