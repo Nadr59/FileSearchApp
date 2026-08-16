@@ -1,6 +1,10 @@
 package com.filemanager.search.ui.components
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,11 +19,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
@@ -28,7 +33,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -121,7 +125,8 @@ fun FileItemCard(
 fun FileInfoBottomSheet(
     file: FileItem,
     onDismiss: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onAnalyze: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState()
@@ -177,13 +182,13 @@ fun FileInfoBottomSheet(
 
             Spacer(Modifier.height(20.dp))
             Divider()
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
 
+            // ═══ الصف الأول: فتح، مشاركة، حذف ═══
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                // ═══ زر فتح الملف ═══
                 ActionButton(
                     icon = Icons.Default.FolderOpen,
                     label = "Open",
@@ -199,22 +204,7 @@ fun FileInfoBottomSheet(
                             }
                             context.startActivity(intent)
                         }
-                    } catch (_: Exception) {
-                        try {
-                            // محاولة بديلة: افتح المجلد
-                            val intent = Intent(Intent.ACTION_VIEW)
-                            val dirPath = file.path.substringBeforeLast('/')
-                            val dirUri = androidx.core.content.FileProvider.getUriForFile(
-                                context,
-                                "${context.packageName}.provider",
-                                java.io.File(dirPath)
-                            )
-                            intent.setDataAndType(dirUri, "resource/folder")
-                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            context.startActivity(intent)
-                        } catch (_2: Exception) {}
-                    }
+                    } catch (_: Exception) {}
                 }
 
                 ActionButton(
@@ -243,15 +233,46 @@ fun FileInfoBottomSheet(
                     onDelete()
                 }
             }
+
+            Spacer(Modifier.height(16.dp))
+
+            // ═══ الصف الثاني: تحليل AI، نسخ معلومات ═══
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                ActionButton(
+                    icon = Icons.Default.AutoAwesome,
+                    label = "AI Analysis",
+                    color = Color(0xFF7C4DFF)
+                ) {
+                    onAnalyze()
+                }
+
+                ActionButton(
+                    icon = Icons.Default.ContentCopy,
+                    label = "Copy Info",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                ) {
+                    val info = buildString {
+                        appendLine("Name: ${file.name}")
+                        appendLine("Type: ${file.fileType.displayName} (.${file.extension})")
+                        appendLine("Size: ${formatFileSize(file.size)}")
+                        appendLine("Path: ${file.path}")
+                        appendLine("Modified: ${formatDate(file.dateModified)}")
+                    }
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("file_info", info))
+                    Toast.makeText(context, "Info copied", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-    ) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
@@ -278,9 +299,18 @@ private fun ActionButton(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.clickable { onClick() }
     ) {
-        Icon(imageVector = icon, contentDescription = label, tint = color, modifier = Modifier.size(28.dp))
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = color,
+            modifier = Modifier.size(28.dp)
+        )
         Spacer(Modifier.height(4.dp))
-        Text(text = label, style = MaterialTheme.typography.labelSmall, color = color)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color
+        )
     }
 }
 
@@ -290,14 +320,29 @@ fun DeleteConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         icon = {
-            Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(32.dp))
+            Icon(Icons.Default.Delete, null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(32.dp))
         },
-        title = { Text(if (count == 1) "Delete file?" else "Delete $count files?", fontWeight = FontWeight.Bold) },
+        title = {
+            Text(
+                if (count == 1) "Delete file?" else "Delete $count files?",
+                fontWeight = FontWeight.Bold
+            )
+        },
         text = { Text("This action cannot be undone.") },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onConfirm) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
     )
 }
