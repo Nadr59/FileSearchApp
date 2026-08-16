@@ -7,13 +7,13 @@ import com.filemanager.search.data.monitor.AppFilter
 import com.filemanager.search.data.monitor.AppNetworkUsage
 import com.filemanager.search.data.monitor.NetworkData
 import com.filemanager.search.data.monitor.NetworkRepository
+import com.filemanager.search.data.monitor.StatsPeriod
 import com.filemanager.search.data.monitor.SystemNetworkStats
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -25,8 +25,10 @@ data class NetworkUiState(
     val topApps: List<AppNetworkUsage> = emptyList(),
     val filter: AppFilter = AppFilter.ALL,
     val searchQuery: String = "",
+    val selectedPeriod: StatsPeriod = StatsPeriod.MONTH,
     val hasUsageAccess: Boolean = false,
     val isNetworkAvailable: Boolean = true,
+    val isNetworkStatsData: Boolean = false,
     val error: String? = null
 )
 
@@ -37,12 +39,12 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
     private val _data = MutableStateFlow(NetworkData.EMPTY)
     private val _filter = MutableStateFlow(AppFilter.ALL)
     private val _searchQuery = MutableStateFlow("")
+    private val _selectedPeriod = MutableStateFlow(StatsPeriod.MONTH)
 
     val uiState: StateFlow<NetworkUiState> = combine(
-        _data, _filter, _searchQuery
-    ) { data, filter, query ->
+        _data, _filter, _searchQuery, _selectedPeriod
+    ) { data, filter, query, period ->
         val topApps = data.appUsageList.take(10)
-
         val filtered = applyFilters(data.appUsageList, filter, query)
 
         NetworkUiState(
@@ -53,8 +55,10 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
             topApps = topApps,
             filter = filter,
             searchQuery = query,
+            selectedPeriod = period,
             hasUsageAccess = data.hasUsageAccess,
-            isNetworkAvailable = repository.isNetworkAvailable()
+            isNetworkAvailable = repository.isNetworkAvailable(),
+            isNetworkStatsData = data.isNetworkStatsData
         )
     }.stateIn(
         scope = viewModelScope,
@@ -67,12 +71,18 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun loadData() {
+        val period = _selectedPeriod.value
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val data = repository.getPerAppUsage()
+                val data = repository.getPerAppUsage(period)
                 _data.value = data
             } catch (_: Exception) {}
         }
+    }
+
+    fun onPeriodSelected(period: StatsPeriod) {
+        _selectedPeriod.value = period
+        loadData()
     }
 
     fun onFilterSelected(filter: AppFilter) {
@@ -96,10 +106,9 @@ class NetworkViewModel(application: Application) : AndroidViewModel(application)
             AppFilter.ALL -> apps
             AppFilter.SYSTEM -> apps.filter { it.isSystemApp }
             AppFilter.USER -> apps.filter { !it.isSystemApp }
-            AppFilter.TOP_MEMORY -> apps // في سياق الشبكة = الأكثر استهلاكاً
+            AppFilter.TOP_MEMORY -> apps.sortedByDescending { it.totalBytes }
             AppFilter.RUNNING -> apps.filter { it.totalBytes > 0 }
         }
-
         return if (query.isBlank()) filtered
         else filtered.filter {
             it.appName.contains(query, ignoreCase = true) ||
