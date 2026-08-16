@@ -30,10 +30,13 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -64,22 +67,27 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.filemanager.search.data.FileItem
 import com.filemanager.search.data.FileType
 import com.filemanager.search.ui.components.DeleteConfirmDialog
 import com.filemanager.search.ui.components.FileInfoBottomSheet
 import com.filemanager.search.ui.components.FileItemCard
 import com.filemanager.search.viewmodel.FileSearchViewModel
+import com.filemanager.search.viewmodel.SortField
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
+fun FileSearchScreen(
+    viewModel: FileSearchViewModel = viewModel(),
+    sharedText: String? = null,
+    onSharedTextConsumed: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
+    onNavigateToAnalysis: (FileItem) -> Unit = {}
+) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // ═══════════════════════════════════════════
-    // فحص الصلاحيات
-    // ═══════════════════════════════════════════
     fun hasReadPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -98,21 +106,13 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // مطلقات الصلاحيات
-    // ═══════════════════════════════════════════
-
-    // إذن القراءة والكتابة معاً (Android 10)
     val allPermissionsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val read = hasReadPermission()
-        val write = hasWritePermission()
-        viewModel.onPermissionResult(read)
-        viewModel.onDeletePermissionResult(write)
+    ) {
+        viewModel.onPermissionResult(hasReadPermission())
+        viewModel.onDeletePermissionResult(hasWritePermission())
     }
 
-    // إذن Manage Storage (Android 11+)
     val manageStorageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -120,15 +120,20 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         viewModel.onDeletePermissionResult(hasWritePermission())
     }
 
-    // فحص عند بدء التطبيق
     LaunchedEffect(Unit) {
         viewModel.onPermissionResult(hasReadPermission())
         viewModel.onDeletePermissionResult(hasWritePermission())
     }
 
-    // ═══════════════════════════════════════════
-    // طلب إذن القراءة
-    // ═══════════════════════════════════════════
+    // ═══ معالجة النص المُشارك ═══
+    LaunchedEffect(sharedText) {
+        if (!sharedText.isNullOrBlank()) {
+            viewModel.onFileTypeSelected(FileType.ALL)
+            viewModel.searchFiles(initialQuery = sharedText)
+            onSharedTextConsumed()
+        }
+    }
+
     fun requestReadPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -143,7 +148,6 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
                 )
             }
         } else {
-            // ═══ Android 10: اطلب READ + WRITE معاً ═══
             allPermissionsLauncher.launch(
                 arrayOf(
                     Manifest.permission.READ_EXTERNAL_STORAGE,
@@ -153,9 +157,6 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         }
     }
 
-    // ═══════════════════════════════════════════
-    // طلب إذن الكتابة (للحذف)
-    // ═══════════════════════════════════════════
     fun requestWritePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -170,14 +171,12 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
                 )
             }
         } else {
-            // ═══ Android 10: اطلب WRITE ═══
             allPermissionsLauncher.launch(
                 arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             )
         }
     }
 
-    // ═══ رسالة الحذف ═══
     LaunchedEffect(uiState.deleteMessage) {
         uiState.deleteMessage?.let {
             snackbarHostState.showSnackbar(it)
@@ -190,6 +189,8 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
     ) {
         viewModel.onBackPressed()
     }
+
+    var showSortMenu by remember { mutableStateOf(false) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -213,7 +214,36 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
                                 Icon(Icons.Default.DoneAll, "Select All")
                             }
                             IconButton(onClick = { viewModel.onDeleteClicked() }) {
-                                Icon(Icons.Default.Delete, "Delete", tint = MaterialTheme.colorScheme.error)
+                                Icon(Icons.Default.Delete, "Delete",
+                                    tint = MaterialTheme.colorScheme.error)
+                            }
+                        } else {
+                            // ═══ زر الترتيب ═══
+                            Box {
+                                IconButton(onClick = { showSortMenu = true }) {
+                                    Icon(Icons.Default.Sort, "Sort")
+                                }
+                                DropdownMenu(
+                                    expanded = showSortMenu,
+                                    onDismissRequest = { showSortMenu = false }
+                                ) {
+                                    SortField.entries.forEach { field ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(field.displayName)
+                                                    if (uiState.sortField == field) {
+                                                        Spacer(Modifier.width(8.dp))
+                                                        Text(
+                                                            if (uiState.sortAscending) "↑" else "↓",
+                                                            fontSize = 14.sp,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        viewModel.onSortFieldSelected(field)
+                                                showSortMenu = false
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     },
@@ -232,11 +262,17 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
                     selectedType = uiState.selectedFileType,
                     isSearching = uiState.isSearching,
                     onTypeSelected = { viewModel.onFileTypeSelected(it) },
-                    onSearch = { viewModel.searchFiles() }
+                    onSearch = { viewModel.searchFiles() },
+                    onSettings = onNavigateToSettings
                 )
             } else {
                 ResultsContent(
-                    uiState = uiState,
+                    uiState = ui )
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                               State,
                     onSearchQueryChanged = { viewModel.onSearchQueryChanged(it) },
                     onFileClick = { viewModel.onFileClick(it) },
                     onFileLongPress = { viewModel.onFileLongPress(it) },
@@ -251,11 +287,15 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         FileInfoBottomSheet(
             file = uiState.selectedFileInfo!!,
             onDismiss = { viewModel.onFileInfoDismissed() },
-            onDelete = { viewModel.onDeleteSingleFile(uiState.selectedFileInfo!!) }
+            onDelete = { viewModel.onDeleteSingleFile(uiState.selectedFileInfo!!) },
+            onAnalyze = {
+                val file = uiState.selectedFileInfo!!
+                viewModel.onFileInfoDismissed()
+                onNavigateToAnalysis(file)
+            }
         )
     }
 
-    // ═══ تأكيد الحذف ═══
     if (uiState.showDeleteDialog) {
         DeleteConfirmDialog(
             count = uiState.selectedFileIds.size,
@@ -264,33 +304,28 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
         )
     }
 
-    // ═══ طلب إذن الحذف ═══
     if (uiState.showDeletePermissionDialog) {
         AlertDialog(
             onDismissRequest = { viewModel.onDeletePermissionDialogDismissed() },
             icon = {
-                Icon(
-                    Icons.Default.Warning, null,
+                Icon(Icons.Default.Warning, null,
                     tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(32.dp)
-                )
+                    modifier = Modifier.size(32.dp))
             },
             title = { Text("Delete Permission Required", fontWeight = FontWeight.Bold) },
             text = {
                 Text(
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                        "To delete files, enable 'Allow management of all files' in the next screen."
+                        "Enable 'Allow management of all files' in the next screen."
                     else
-                        "To delete files, the app needs write permission to storage."
+                        "Grant write permission to storage."
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.onDeletePermissionDialogDismissed()
                     requestWritePermission()
-                }) {
-                    Text("Grant Permission")
-                }
+                }) { Text("Grant") }
             },
             dismissButton = {
                 TextButton(onClick = { viewModel.onDeletePermissionDialogDismissed() }) {
@@ -304,14 +339,26 @@ fun FileSearchScreen(viewModel: FileSearchViewModel = viewModel()) {
 @Composable
 private fun PermissionScreen(onRequest: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-            Icon(Icons.Default.Warning, null, Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(Icons.Default.Warning, null, Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(16.dp))
-            Text("Storage Permission Required", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+            Text("Storage Permission Required",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))
-            Text("Grant storage access to search and manage files.", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Grant storage access to search and manage files.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
-            Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) { Text("Grant Permission") }
+            Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) {
+                Text("Grant Permission")
+            }
         }
     }
 }
@@ -322,20 +369,43 @@ private fun SearchSetupScreen(
     selectedType: FileType,
     isSearching: Boolean,
     onTypeSelected: (FileType) -> Unit,
-    onSearch: () -> Unit
+    onSearch: () -> Unit,
+    onSettings: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(modifier = Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("🔍", fontSize = 48.sp)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // ═══ زر الإعدادات ═══
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = onSettings) {
+                    Icon(Icons.Default.Settings, "Settings")
+                }
+            }
+
+            Text("\uD83D\uDD0D", fontSize = 48.sp)
             Spacer(Modifier.height(12.dp))
-            Text("File Search", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text("File Search",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            Text("Select a file type and tap Search", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Select a file type and tap Search",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(32.dp))
 
-            ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { if (!isSearching) expanded = !expanded }) {
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { if (!isSearching) expanded = !expanded }
+            ) {
                 OutlinedTextField(
                     value = "${selectedType.emoji}  ${selectedType.displayName}",
                     onValueChange = {},
@@ -344,7 +414,10 @@ private fun SearchSetupScreen(
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
                     modifier = Modifier.menuAnchor().fillMaxWidth()
                 )
-                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
                     FileType.entries.forEach { type ->
                         DropdownMenuItem(
                             text = { Text("${type.emoji}  ${type.displayName}") },
@@ -355,9 +428,17 @@ private fun SearchSetupScreen(
             }
 
             Spacer(Modifier.height(24.dp))
-            Button(onClick = onSearch, modifier = Modifier.fillMaxWidth().height(52.dp), enabled = !isSearching) {
+            Button(
+                onClick = onSearch,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                enabled = !isSearching
+            ) {
                 if (isSearching) {
-                    CircularProgressIndicator(Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                    CircularProgressIndicator(
+                        Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text("Searching...")
                 } else {
@@ -374,12 +455,15 @@ private fun SearchSetupScreen(
 private fun ResultsContent(
     uiState: com.filemanager.search.viewmodel.FileSearchUiState,
     onSearchQueryChanged: (String) -> Unit,
-    onFileClick: (com.filemanager.search.data.FileItem) -> Unit,
-    onFileLongPress: (com.filemanager.search.data.FileItem) -> Unit,
+    onFileClick: (FileItem) -> Unit,
+    onFileLongPress: (FileItem) -> Unit,
     onDeselectAll: () -> Unit
 ) {
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = onSearchQueryChanged,
@@ -387,7 +471,9 @@ private fun ResultsContent(
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = {
                     if (uiState.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onSearchQueryChanged("") }) { Icon(Icons.Default.Close, "Clear") }
+                        IconButton(onClick = { onSearchQueryChanged("") }) {
+                            Icon(Icons.Default.Close, "Clear")
+                        }
                     }
                 },
                 singleLine = true,
@@ -399,15 +485,44 @@ private fun ResultsContent(
             }
         }
 
+        // ═══ مؤشر الترتيب ═══
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "${uiState.filteredResults.size} files",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "·",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "Sorted by ${uiState.sortField.displayName} ${if (uiState.sortAscending) "↑" else "↓"}",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
         if (uiState.isSearching) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
         } else if (uiState.filteredResults.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("📂", fontSize = 48.sp)
+                    Text("\uD83D\uDCC2", fontSize = 48.sp)
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        if (uiState.searchQuery.isNotEmpty()) "No files match '${uiState.searchQuery}'" else "No files found",
+                        if (uiState.searchQuery.isNotEmpty())
+                            "No files match '${uiState.searchQuery}'"
+                        else "No files found",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -419,7 +534,10 @@ private fun ResultsContent(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(items = uiState.filteredResults, key = { "${it.path}|${it.id}" }) { file ->
+                items(
+                    items = uiState.filteredResults,
+                    key = { "${it.path}|${it.id}" }
+                ) { file ->
                     FileItemCard(
                         file = file,
                         isSelected = file.id in uiState.selectedFileIds,
