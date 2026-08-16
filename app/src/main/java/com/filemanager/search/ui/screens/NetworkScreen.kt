@@ -1,0 +1,319 @@
+package com.filemanager.search.ui.screens
+
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.filemanager.search.data.monitor.AppFilter
+import com.filemanager.search.data.monitor.AppNetworkUsage
+import com.filemanager.search.ui.components.AppIcon
+import com.filemanager.search.ui.components.NetworkStatusCard
+import com.filemanager.search.utils.formatFileSize
+import com.filemanager.search.viewmodel.NetworkViewModel
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun NetworkScreen(
+    viewModel: NetworkViewModel = viewModel(),
+    onNavigateToUsageAccess: () -> Unit = {},
+    onAppClick: (String) -> Unit = {}
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("استهلاك الإنترنت", fontWeight = FontWeight.Bold) },
+                actions = {
+                    IconButton(onClick = { viewModel.loadData() }) {
+                        IconImage
+import com.filemanager.search.ui.components.AppTypeBadge(Icons.Default.Refresh, "Refresh")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        if (uiState.isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // ═══ بطاقة الشبكة ═══
+                item {
+                    NetworkStatusCard(
+                        totalRx = uiState.systemStats.totalRxBytes,
+                        totalTx = uiState.systemStats.totalTxBytes,
+                        mobileTotal = uiState.systemStats.mobileTotalBytes,
+                        wifiTotal = uiState.systemStats.wifiTotalBytes,
+                        topAppName = uiState.topApps.firstOrNull()?.appName,
+                        topAppTotal = uiState.topApps.firstOrNull()?.totalBytes ?: 0
+                    )
+                }
+
+                // ═══ تنبيه عدم الاتصال ═══
+                if (!uiState.isNetworkAvailable) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Text(
+                                "لا يوجد اتصال بالإنترنت",
+                                modifier = Modifier.padding(12.dp),
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+
+                // ═══ Usage Access ═══
+                if (!uiState.hasUsageAccess) {
+                    item {
+                        TextButton(
+                            onClick = onNavigateToUsageAccess,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("تفعيل Usage Access لبيانات تاريخية")
+                        }
+                    }
+                }
+
+                // ═══ ملاحظة ═══
+                item {
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        Text(
+                            "البيانات تُجمع منذ آخر تشغيل للجهاز. " +
+                            "لإحصائيات تاريخية تفصيلية فعّل Usage Access.",
+                            modifier = Modifier.padding(12.dp),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // ═══ الفلاتر ═══
+                item {
+                    Flow(Icons.Default.Search, null) },
+                       Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        AppFilter.entries.forEach { filter ->
+                            FilterChip(
+                                selected = uiState.filter == filter,
+                                onClick = { viewModel.onFilterSelected(filter) },
+                                label = { Text(filter.label, fontSize = 12.sp) }
+                            )
+                        }
+                    }
+                }
+
+                // ═══ البحث ═══
+                item {
+                    OutlinedTextField(
+                        value = uiState.searchQuery,
+                        onValueChange = { viewModel.onSearchQueryChanged(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("بحث...") },
+                        leadingIcon = { Icon trailingIcon = {
+                            if (uiState.searchQuery.isNotBlank()) {
+                                IconButton(onClick = {
+                                    viewModel.onSearchQueryChanged("")
+                                }) {
+                                    Icon(Icons.Default.Close, "مسح")
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+                }
+
+                // ═══ عدد النتائج ═══
+                item {
+                    Text(
+                        "${uiState.filteredApps.size} تطبيق",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // ═══ قائمة التطبيقات ═══
+                items(
+                    items = uiState.filteredApps,
+                    key = { "net_${it.uid}_${it.packageName}" }
+                ) { app ->
+                    AppNetworkCard(
+                        app = app,
+                        totalSystemBytes = uiState.systemStats.totalBytes,
+                        onClick = { onAppClick(app.packageName) }
+                    )
+                }
+
+                if (uiState.filteredApps.isEmpty() && !uiState.isLoading) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "لا توجد بيانات استخدام",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                item { Spacer(Modifier.height(16.dp)) }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// بطاقة استخدام شبكة التطبيق
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun AppNetworkCard(
+    app: AppNetworkUsage,
+    totalSystemBytes: Long,
+    onClick: () -> Unit
+) {
+    val percent = if (totalSystemBytes > 0) {
+        (app.totalBytes.toFloat() / totalSystemBytes * 100)
+    } else 0f
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AppIconImage(app.packageName, size = 40.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        app.appName,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        app.packageName,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        formatFileSize(app.totalBytes),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (percent > 0) {
+                        Text(
+                            "${String.format("%.1f", percent)}%",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                AppTypeBadge(isSystemApp = app.isSystemApp)
+                Text(
+                    "↓ ${formatFileSize(app.rxBytes)}  ↑ ${formatFileSize(app.txBytes)}",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
